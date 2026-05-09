@@ -1,0 +1,50 @@
+// FILE: digital-planner/app.json
+{
+  "expo": {
+    "name": "Digital Planner",
+    "slug": "digital-planner",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.planner.digitalplanner",
+      "infoPlist": {
+        "NSCalendarsUsageDescription": "This app needs access to your calendar to display and sync events.",
+        "NSRemindersUsageDescription": "This app needs access to your reminders to display tasks.",
+        "NSCalendarsFullAccessUsageDescription": "This app needs full access to your calendar to display and sync events."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "package": "com.planner.digitalplanner",
+      "permissions": [
+        "READ_CALENDAR",
+        "WRITE_CALENDAR",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-calendar",
+      "expo-document-picker",
+      [
+        "expo-file-system",
+        {}
+      ]
+    ]
+  }
+}
