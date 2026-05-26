@@ -4,10 +4,8 @@
     "slug": "digital-planner",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#1a1a2e"
     },
@@ -23,7 +21,6 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a1a2e"
       },
       "package": "com.planner.digitalplanner",
@@ -34,16 +31,14 @@
         "WRITE_EXTERNAL_STORAGE"
       ]
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
     "plugins": [
       "expo-calendar",
-      "expo-document-picker",
-      [
-        "expo-file-system",
-        {}
-      ]
-    ]
+      "expo-document-picker"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": e4748f02-1103-4136-9b77-64697c1cf04c
+      }
+    }
   }
 }
