@@ -22,8 +22,9 @@ interface HandwritingCanvasProps {
   editable?: boolean;
 }
 
-const MAX_POINTS_PER_PATH = 500;
-const MAX_PATHS = 200;
+const MAX_POINTS_PER_PATH = 1000;
+const MAX_PATHS = 500;
+const MIN_DISTANCE = 1.5;
 
 export default function HandwritingCanvas({
   initialDrawings = [],
@@ -34,11 +35,12 @@ export default function HandwritingCanvas({
   editable = true,
 }: HandwritingCanvasProps) {
   const [paths, setPaths] = useState<DrawingPath[]>(initialDrawings);
-  const [currentPath, setCurrentPath] = useState<Point[]>([]);
+  const [currentPathPoints, setCurrentPathPoints] = useState<Point[]>([]);
   const [selectedColor, setSelectedColor] = useState(PEN_COLORS[0]);
   const [selectedSize, setSelectedSize] = useState(PEN_SIZES[1]);
   const [isEraser, setIsEraser] = useState(false);
   const [showToolbar, setShowToolbar] = useState(false);
+  const [renderTrigger, setRenderTrigger] = useState(0);
 
   const pathsRef = useRef<DrawingPath[]>(initialDrawings);
   const currentPathRef = useRef<Point[]>([]);
@@ -46,11 +48,13 @@ export default function HandwritingCanvas({
   const selectedSizeRef = useRef(selectedSize);
   const isEraserRef = useRef(isEraser);
   const lastPointRef = useRef<Point | null>(null);
-  const updateTimeoutRef = useRef<any>(null);
+  const isDrawingRef = useRef(false);
 
   useEffect(() => {
-    setPaths(initialDrawings);
-    pathsRef.current = initialDrawings;
+    if (initialDrawings && initialDrawings.length > 0) {
+      setPaths(initialDrawings);
+      pathsRef.current = initialDrawings;
+    }
   }, []);
 
   useEffect(() => {
@@ -65,30 +69,13 @@ export default function HandwritingCanvas({
     isEraserRef.current = isEraser;
   }, [isEraser]);
 
-  useEffect(() => {
-    return () => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-    };
-  }, []);
-
   const shouldAddPoint = (newPoint: Point): boolean => {
     if (!lastPointRef.current) return true;
     const dx = newPoint.x - lastPointRef.current.x;
     const dy = newPoint.y - lastPointRef.current.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    return distance >= 2;
+    return distance >= MIN_DISTANCE;
   };
-
-  const throttledSetCurrentPath = useCallback((points: Point[]) => {
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-    updateTimeoutRef.current = setTimeout(() => {
-      setCurrentPath([...points]);
-    }, 16);
-  }, []);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -96,6 +83,8 @@ export default function HandwritingCanvas({
       onMoveShouldSetPanResponder: () => editable,
       onStartShouldSetPanResponderCapture: () => editable,
       onMoveShouldSetPanResponderCapture: () => editable,
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
 
       onPanResponderGrant: (evt) => {
         try {
@@ -105,12 +94,13 @@ export default function HandwritingCanvas({
           if (isEraserRef.current) {
             eraseAtPoint(locationX, locationY);
           } else {
+            isDrawingRef.current = true;
             currentPathRef.current = [point];
             lastPointRef.current = point;
-            setCurrentPath([point]);
+            setCurrentPathPoints([point]);
           }
         } catch (e) {
-          console.log('Touch start error:', e);
+          console.log('Grant error:', e);
         }
       },
 
@@ -121,57 +111,91 @@ export default function HandwritingCanvas({
 
           if (isEraserRef.current) {
             eraseAtPoint(locationX, locationY);
-          } else {
-            if (currentPathRef.current.length >= MAX_POINTS_PER_PATH) {
-              return;
-            }
+            return;
+          }
 
-            if (shouldAddPoint(point)) {
-              currentPathRef.current.push(point);
-              lastPointRef.current = point;
-              throttledSetCurrentPath(currentPathRef.current);
-            }
+          if (!isDrawingRef.current) return;
+
+          if (currentPathRef.current.length >= MAX_POINTS_PER_PATH) {
+            return;
+          }
+
+          if (shouldAddPoint(point)) {
+            currentPathRef.current = [...currentPathRef.current, point];
+            lastPointRef.current = point;
+            setCurrentPathPoints(currentPathRef.current);
           }
         } catch (e) {
-          console.log('Touch move error:', e);
+          console.log('Move error:', e);
         }
       },
 
       onPanResponderRelease: () => {
         try {
-          if (updateTimeoutRef.current) {
-            clearTimeout(updateTimeoutRef.current);
-            updateTimeoutRef.current = null;
+          if (isEraserRef.current) {
+            isDrawingRef.current = false;
+            return;
           }
 
-          if (!isEraserRef.current && currentPathRef.current.length > 0) {
-            if (pathsRef.current.length >= MAX_PATHS) {
-              console.log('Max paths reached');
-            } else {
-              const newPath: DrawingPath = {
-                id: uuidv4(),
-                points: [...currentPathRef.current],
-                color: selectedColorRef.current,
-                strokeWidth: selectedSizeRef.current,
-              };
-              const updatedPaths = [...pathsRef.current, newPath];
-              pathsRef.current = updatedPaths;
-              setPaths(updatedPaths);
-              onDrawingsChange?.(updatedPaths);
+          if (currentPathRef.current.length > 0) {
+            const newPath: DrawingPath = {
+              id: uuidv4(),
+              points: currentPathRef.current.slice(),
+              color: selectedColorRef.current,
+              strokeWidth: selectedSizeRef.current,
+            };
+
+            const newPaths = [...pathsRef.current, newPath];
+            pathsRef.current = newPaths;
+
+            setPaths(newPaths);
+            setCurrentPathPoints([]);
+            setRenderTrigger((prev) => prev + 1);
+
+            if (onDrawingsChange) {
+              setTimeout(() => {
+                onDrawingsChange(newPaths);
+              }, 0);
             }
+          } else {
+            setCurrentPathPoints([]);
           }
+
           currentPathRef.current = [];
           lastPointRef.current = null;
-          setCurrentPath([]);
+          isDrawingRef.current = false;
         } catch (e) {
-          console.log('Touch release error:', e);
+          console.log('Release error:', e);
+          currentPathRef.current = [];
+          lastPointRef.current = null;
+          isDrawingRef.current = false;
+          setCurrentPathPoints([]);
         }
       },
 
       onPanResponderTerminate: () => {
-        currentPathRef.current = [];
-        lastPointRef.current = null;
-        setCurrentPath([]);
+        try {
+          if (currentPathRef.current.length > 0 && !isEraserRef.current) {
+            const newPath: DrawingPath = {
+              id: uuidv4(),
+              points: currentPathRef.current.slice(),
+              color: selectedColorRef.current,
+              strokeWidth: selectedSizeRef.current,
+            };
+            const newPaths = [...pathsRef.current, newPath];
+            pathsRef.current = newPaths;
+            setPaths(newPaths);
+            if (onDrawingsChange) {
+              setTimeout(() => onDrawingsChange(newPaths), 0);
+            }
+          }
+          currentPathRef.current = [];
+          lastPointRef.current = null;
+          isDrawingRef.current = false;
+          setCurrentPathPoints([]);
+        } catch (e) {
+          console.log('Terminate error:', e);
+        }
       },
     })
   ).current;
@@ -190,7 +214,9 @@ export default function HandwritingCanvas({
         if (filtered.length !== pathsRef.current.length) {
           pathsRef.current = filtered;
           setPaths(filtered);
-          onDrawingsChange?.(filtered);
+          if (onDrawingsChange) {
+            onDrawingsChange(filtered);
+          }
         }
       } catch (e) {
         console.log('Erase error:', e);
@@ -202,17 +228,20 @@ export default function HandwritingCanvas({
   const pointsToSvgPath = (points: Point[]): string => {
     if (!points || points.length === 0) return '';
     if (points.length === 1) {
-      return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.1} ${
-        points[0].y + 0.1
-      }`;
+      const p = points[0];
+      return `M ${p.x} ${p.y} L ${p.x + 0.5} ${p.y + 0.5}`;
     }
+    if (points.length === 2) {
+      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+    }
+
     let path = `M ${points[0].x} ${points[0].y}`;
     for (let i = 1; i < points.length - 1; i++) {
-      const prev = points[i - 1];
       const curr = points[i];
-      const midX = (prev.x + curr.x) / 2;
-      const midY = (prev.y + curr.y) / 2;
-      path += ` Q ${prev.x} ${prev.y} ${midX} ${midY}`;
+      const next = points[i + 1];
+      const midX = (curr.x + next.x) / 2;
+      const midY = (curr.y + next.y) / 2;
+      path += ` Q ${curr.x} ${curr.y} ${midX} ${midY}`;
     }
     const last = points[points.length - 1];
     path += ` L ${last.x} ${last.y}`;
@@ -222,14 +251,19 @@ export default function HandwritingCanvas({
   const clearCanvas = () => {
     pathsRef.current = [];
     setPaths([]);
-    onDrawingsChange?.([]);
+    setCurrentPathPoints([]);
+    if (onDrawingsChange) {
+      onDrawingsChange([]);
+    }
   };
 
   const undoLast = () => {
     const updated = pathsRef.current.slice(0, -1);
     pathsRef.current = updated;
     setPaths(updated);
-    onDrawingsChange?.(updated);
+    if (onDrawingsChange) {
+      onDrawingsChange(updated);
+    }
   };
 
   const numberOfLines = Math.floor(height / lineSpacing);
@@ -244,7 +278,7 @@ export default function HandwritingCanvas({
         >
           <Text style={styles.toolbarToggleText}>
             {showToolbar ? '✕ Hide Tools' : '✏️ Drawing Tools'}
-            {paths.length > 0 && `  (${paths.length} strokes)`}
+            {paths.length > 0 ? `  (${paths.length} strokes)` : ''}
           </Text>
         </TouchableOpacity>
       )}
@@ -320,10 +354,11 @@ export default function HandwritingCanvas({
         {...panResponder.panHandlers}
         collapsable={false}
       >
-        <Svg 
+        <Svg
           style={StyleSheet.absoluteFill}
           width="100%"
           height={height}
+          pointerEvents="none"
         >
           {showLines &&
             Array.from({ length: numberOfLines }, (_, i) => (
@@ -331,7 +366,7 @@ export default function HandwritingCanvas({
                 key={`line-${i}`}
                 x1="0"
                 y1={(i + 1) * lineSpacing}
-                x2={screenWidth}
+                x2={screenWidth + 100}
                 y2={(i + 1) * lineSpacing}
                 stroke={COLORS.canvasLine}
                 strokeWidth="0.7"
@@ -350,9 +385,10 @@ export default function HandwritingCanvas({
             />
           ))}
 
-          {currentPath.length > 0 && (
+          {currentPathPoints.length > 0 && (
             <Path
-              d={pointsToSvgPath(currentPath)}
+              key="current-drawing"
+              d={pointsToSvgPath(currentPathPoints)}
               stroke={selectedColor}
               strokeWidth={selectedSize}
               fill="none"
@@ -464,5 +500,6 @@ const styles = StyleSheet.create({
   canvas: {
     backgroundColor: COLORS.canvasBg,
     width: '100%',
+    overflow: 'hidden',
   },
 });
