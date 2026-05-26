@@ -36,6 +36,7 @@
     "plugins": [
       "expo-calendar",
       "expo-document-picker"
+     } 
     "extra": {
       "eas": {
         "projectId": "YOUR-REAL-PROJECT-ID-HERE"
