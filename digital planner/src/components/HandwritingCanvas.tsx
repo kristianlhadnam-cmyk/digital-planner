@@ -1,5 +1,3 @@
-// FILE: digital-planner/src/components/HandwritingCanvas.tsx
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
@@ -8,6 +6,7 @@ import {
   TouchableOpacity,
   Text,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import Svg, { Path, Line } from 'react-native-svg';
 import { DrawingPath, Point } from '../types';
@@ -23,6 +22,9 @@ interface HandwritingCanvasProps {
   editable?: boolean;
 }
 
+const MAX_POINTS_PER_PATH = 500;
+const MAX_PATHS = 200;
+
 export default function HandwritingCanvas({
   initialDrawings = [],
   onDrawingsChange,
@@ -37,16 +39,19 @@ export default function HandwritingCanvas({
   const [selectedSize, setSelectedSize] = useState(PEN_SIZES[1]);
   const [isEraser, setIsEraser] = useState(false);
   const [showToolbar, setShowToolbar] = useState(false);
+
   const pathsRef = useRef<DrawingPath[]>(initialDrawings);
+  const currentPathRef = useRef<Point[]>([]);
+  const selectedColorRef = useRef(selectedColor);
+  const selectedSizeRef = useRef(selectedSize);
+  const isEraserRef = useRef(isEraser);
+  const lastPointRef = useRef<Point | null>(null);
+  const updateTimeoutRef = useRef<any>(null);
 
   useEffect(() => {
     setPaths(initialDrawings);
     pathsRef.current = initialDrawings;
   }, []);
-
-  const selectedColorRef = useRef(selectedColor);
-  const selectedSizeRef = useRef(selectedSize);
-  const isEraserRef = useRef(isEraser);
 
   useEffect(() => {
     selectedColorRef.current = selectedColor;
@@ -60,45 +65,112 @@ export default function HandwritingCanvas({
     isEraserRef.current = isEraser;
   }, [isEraser]);
 
-  const currentPathRef = useRef<Point[]>([]);
+  useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const shouldAddPoint = (newPoint: Point): boolean => {
+    if (!lastPointRef.current) return true;
+    const dx = newPoint.x - lastPointRef.current.x;
+    const dy = newPoint.y - lastPointRef.current.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    return distance >= 2;
+  };
+
+  const throttledSetCurrentPath = useCallback((points: Point[]) => {
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
+    updateTimeoutRef.current = setTimeout(() => {
+      setCurrentPath([...points]);
+    }, 16);
+  }, []);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => editable,
       onMoveShouldSetPanResponder: () => editable,
+      onStartShouldSetPanResponderCapture: () => editable,
+      onMoveShouldSetPanResponderCapture: () => editable,
+
       onPanResponderGrant: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
-        if (isEraserRef.current) {
-          eraseAtPoint(locationX, locationY);
-        } else {
-          currentPathRef.current = [{ x: locationX, y: locationY }];
-          setCurrentPath([{ x: locationX, y: locationY }]);
+        try {
+          const { locationX, locationY } = evt.nativeEvent;
+          const point = { x: locationX, y: locationY };
+
+          if (isEraserRef.current) {
+            eraseAtPoint(locationX, locationY);
+          } else {
+            currentPathRef.current = [point];
+            lastPointRef.current = point;
+            setCurrentPath([point]);
+          }
+        } catch (e) {
+          console.log('Touch start error:', e);
         }
       },
+
       onPanResponderMove: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
-        if (isEraserRef.current) {
-          eraseAtPoint(locationX, locationY);
-        } else {
-          const newPoint = { x: locationX, y: locationY };
-          currentPathRef.current = [...currentPathRef.current, newPoint];
-          setCurrentPath((prev) => [...prev, newPoint]);
+        try {
+          const { locationX, locationY } = evt.nativeEvent;
+          const point = { x: locationX, y: locationY };
+
+          if (isEraserRef.current) {
+            eraseAtPoint(locationX, locationY);
+          } else {
+            if (currentPathRef.current.length >= MAX_POINTS_PER_PATH) {
+              return;
+            }
+
+            if (shouldAddPoint(point)) {
+              currentPathRef.current.push(point);
+              lastPointRef.current = point;
+              throttledSetCurrentPath(currentPathRef.current);
+            }
+          }
+        } catch (e) {
+          console.log('Touch move error:', e);
         }
       },
+
       onPanResponderRelease: () => {
-        if (!isEraserRef.current && currentPathRef.current.length > 0) {
-          const newPath: DrawingPath = {
-            id: uuidv4(),
-            points: currentPathRef.current,
-            color: selectedColorRef.current,
-            strokeWidth: selectedSizeRef.current,
-          };
-          const updatedPaths = [...pathsRef.current, newPath];
-          pathsRef.current = updatedPaths;
-          setPaths(updatedPaths);
-          onDrawingsChange?.(updatedPaths);
+        try {
+          if (updateTimeoutRef.current) {
+            clearTimeout(updateTimeoutRef.current);
+            updateTimeoutRef.current = null;
+          }
+
+          if (!isEraserRef.current && currentPathRef.current.length > 0) {
+            if (pathsRef.current.length >= MAX_PATHS) {
+              console.log('Max paths reached');
+            } else {
+              const newPath: DrawingPath = {
+                id: uuidv4(),
+                points: [...currentPathRef.current],
+                color: selectedColorRef.current,
+                strokeWidth: selectedSizeRef.current,
+              };
+              const updatedPaths = [...pathsRef.current, newPath];
+              pathsRef.current = updatedPaths;
+              setPaths(updatedPaths);
+              onDrawingsChange?.(updatedPaths);
+            }
+          }
+          currentPathRef.current = [];
+          lastPointRef.current = null;
+          setCurrentPath([]);
+        } catch (e) {
+          console.log('Touch release error:', e);
         }
+      },
+
+      onPanResponderTerminate: () => {
         currentPathRef.current = [];
+        lastPointRef.current = null;
         setCurrentPath([]);
       },
     })
@@ -106,25 +178,29 @@ export default function HandwritingCanvas({
 
   const eraseAtPoint = useCallback(
     (x: number, y: number) => {
-      const eraserRadius = 20;
-      const filtered = pathsRef.current.filter((path) => {
-        return !path.points.some(
-          (p) =>
-            Math.abs(p.x - x) < eraserRadius &&
-            Math.abs(p.y - y) < eraserRadius
-        );
-      });
-      if (filtered.length !== pathsRef.current.length) {
-        pathsRef.current = filtered;
-        setPaths(filtered);
-        onDrawingsChange?.(filtered);
+      try {
+        const eraserRadius = 25;
+        const filtered = pathsRef.current.filter((path) => {
+          return !path.points.some(
+            (p) =>
+              Math.abs(p.x - x) < eraserRadius &&
+              Math.abs(p.y - y) < eraserRadius
+          );
+        });
+        if (filtered.length !== pathsRef.current.length) {
+          pathsRef.current = filtered;
+          setPaths(filtered);
+          onDrawingsChange?.(filtered);
+        }
+      } catch (e) {
+        console.log('Erase error:', e);
       }
     },
     [onDrawingsChange]
   );
 
   const pointsToSvgPath = (points: Point[]): string => {
-    if (points.length === 0) return '';
+    if (!points || points.length === 0) return '';
     if (points.length === 1) {
       return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.1} ${
         points[0].y + 0.1
@@ -157,6 +233,7 @@ export default function HandwritingCanvas({
   };
 
   const numberOfLines = Math.floor(height / lineSpacing);
+  const screenWidth = Dimensions.get('window').width;
 
   return (
     <View style={styles.wrapper}>
@@ -243,14 +320,18 @@ export default function HandwritingCanvas({
         {...panResponder.panHandlers}
         collapsable={false}
       >
-        <Svg style={StyleSheet.absoluteFill}>
+        <Svg 
+          style={StyleSheet.absoluteFill}
+          width="100%"
+          height={height}
+        >
           {showLines &&
             Array.from({ length: numberOfLines }, (_, i) => (
               <Line
                 key={`line-${i}`}
                 x1="0"
                 y1={(i + 1) * lineSpacing}
-                x2="2000"
+                x2={screenWidth}
                 y2={(i + 1) * lineSpacing}
                 stroke={COLORS.canvasLine}
                 strokeWidth="0.7"
@@ -311,12 +392,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.cardBorder,
-    gap: 8,
   },
   toolRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    marginBottom: 8,
   },
   toolLabel: {
     color: COLORS.textSecondary,
@@ -336,7 +417,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   selectedColor: {
-    borderColor: COLORS.white,
+    borderColor: '#ffffff',
     transform: [{ scale: 1.2 }],
   },
   sizeRow: {
