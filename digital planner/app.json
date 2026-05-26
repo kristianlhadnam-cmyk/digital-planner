@@ -2,9 +2,11 @@
   "expo": {
     "name": "Digital Planner",
     "slug": "digital-planner",
+    "owner": "kristian.lhadnam",
     "version": "1.0.0",
     "orientation": "default",
     "userInterfaceStyle": "light",
+    "newArchEnabled": false,
     "splash": {
       "resizeMode": "contain",
       "backgroundColor": "#1a1a2e"
@@ -34,11 +36,6 @@
     "plugins": [
       "expo-calendar",
       "expo-document-picker"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "e4748f02-1103-4136-9b77-64697c1cf04c"
-      }
-    }
+    ]
   }
 }
