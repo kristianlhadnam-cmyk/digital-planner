@@ -1,6 +1,4 @@
-// FILE: digital-planner/src/screens/NoteEditorScreen.tsx
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,9 +7,9 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  Dimensions,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -40,40 +38,79 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
   const [drawings, setDrawings] = useState<DrawingPath[]>([]);
   const [section, setSection] = useState<Section>('text');
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [canvasKey, setCanvasKey] = useState(0);
+  
+  const isInitialLoad = useRef(true);
   const isJournal = type === 'journal';
 
   useEffect(() => {
-    if (noteId) loadNote();
+    if (noteId) {
+      loadNote();
+    } else {
+      setLoading(false);
+    }
   }, [noteId]);
 
   const loadNote = async () => {
     if (!noteId) return;
-    const data = await getNote(noteId);
-    if (data) {
-      setNote(data);
-      setTitle(data.title);
-      setText(data.textContent);
-      setDrawings(data.drawings ?? []);
+    setLoading(true);
+    isInitialLoad.current = true;
+    
+    try {
+      const data = await getNote(noteId);
+      if (data) {
+        setNote(data);
+        setTitle(data.title || '');
+        setText(data.textContent || '');
+        setDrawings(data.drawings || []);
+        setCanvasKey(prev => prev + 1);
+      }
+    } catch (e) {
+      console.log('Load note error:', e);
     }
+    
+    setLoading(false);
+    setTimeout(() => {
+      isInitialLoad.current = false;
+    }, 500);
   };
 
   const save = useCallback(async () => {
     if (!noteId) return;
     setSaving(true);
-    await updateNote(noteId, { title, textContent: text, drawings });
+    try {
+      await updateNote(noteId, { title, textContent: text, drawings });
+    } catch (e) {
+      console.log('Save error:', e);
+    }
     setSaving(false);
   }, [noteId, title, text, drawings]);
 
-  // Auto-save 1 s after typing stops
+  // Auto-save when text/title changes
   useEffect(() => {
-    const t = setTimeout(() => { if (noteId) save(); }, 1000);
-    return () => clearTimeout(t);
+    if (isInitialLoad.current) return;
+    if (!noteId) return;
+    
+    const timer = setTimeout(() => {
+      save();
+    }, 1000);
+    
+    return () => clearTimeout(timer);
   }, [title, text]);
 
   const handleDrawChange = useCallback(
-    async (d: DrawingPath[]) => {
-      setDrawings(d);
-      if (noteId) await updateNote(noteId, { drawings: d });
+    async (newDrawings: DrawingPath[]) => {
+      if (isInitialLoad.current) return;
+      
+      setDrawings(newDrawings);
+      if (noteId) {
+        try {
+          await updateNote(noteId, { drawings: newDrawings });
+        } catch (e) {
+          console.log('Save drawings error:', e);
+        }
+      }
     },
     [noteId]
   );
@@ -98,7 +135,8 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         await loadNote();
       }
       Alert.alert('✅ Attached', `${fileName} has been attached.`);
-    } catch {
+    } catch (e) {
+      console.log('PDF error:', e);
       Alert.alert('Error', 'Could not attach PDF.');
     }
   };
@@ -124,6 +162,21 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
     { key: 'pdf', label: '📄 PDF' },
   ];
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <CalendarHeader
+          onHomePress={() => navigation.navigate('Home')}
+          title={isJournal ? 'Journal Entry' : 'Note'}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.highlight} />
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <CalendarHeader
@@ -131,7 +184,7 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         title={isJournal ? 'Journal Entry' : 'Note'}
       />
 
-      {/* Title */}
+      {/* Title bar */}
       <View style={styles.titleBar}>
         <TextInput
           style={styles.titleInput}
@@ -143,7 +196,7 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         {note && (
           <Text style={styles.savedLabel}>
             {saving
-              ? 'Saving…'
+              ? 'Saving...'
               : `Saved ${format(new Date(note.updatedAt), 'HH:mm')}`}
           </Text>
         )}
@@ -157,12 +210,7 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
             style={[styles.tab, section === s.key && styles.activeTab]}
             onPress={() => setSection(s.key)}
           >
-            <Text
-              style={[
-                styles.tabText,
-                section === s.key && styles.activeTabText,
-              ]}
-            >
+            <Text style={[styles.tabText, section === s.key && styles.activeTabText]}>
               {s.label}
             </Text>
           </TouchableOpacity>
@@ -174,9 +222,9 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={120}
       >
-        <ScrollView contentContainerStyle={styles.scroll}>
-          {/* ── TEXT ── */}
-          {section === 'text' && (
+        {/* TEXT SECTION */}
+        {section === 'text' && (
+          <ScrollView contentContainerStyle={styles.scroll}>
             <TextInput
               style={styles.textArea}
               multiline
@@ -185,69 +233,70 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
               placeholder={
                 isJournal
                   ? 'How was your day?\nWhat are you grateful for?\nWhat did you learn?'
-                  : 'Write your notes here…'
+                  : 'Write your notes here...'
               }
-              placeholderTextColor="#aaa"
+              placeholderTextColor="#999"
               textAlignVertical="top"
             />
-          )}
+          </ScrollView>
+        )}
 
-          {/* ── DRAW ── */}
-          {section === 'draw' && (
-            <View>
-              <Text style={styles.sectionHint}>
-                ✏️ Write or sketch below
+        {/* DRAW SECTION */}
+        {section === 'draw' && (
+          <View style={styles.drawSection}>
+            <Text style={styles.sectionHint}>
+              ✏️ Write or sketch below
+            </Text>
+            <HandwritingCanvas
+              key={`note-canvas-${noteId}-${canvasKey}`}
+              initialDrawings={drawings}
+              onDrawingsChange={handleDrawChange}
+              height={520}
+              showLines
+              lineSpacing={32}
+            />
+          </View>
+        )}
+
+        {/* PDF SECTION */}
+        {section === 'pdf' && (
+          <ScrollView contentContainerStyle={styles.scroll}>
+            <TouchableOpacity style={styles.attachBtn} onPress={handleAttachPdf}>
+              <Text style={styles.attachIcon}>📎</Text>
+              <Text style={styles.attachTitle}>Attach PDF</Text>
+              <Text style={styles.attachSub}>
+                Meeting agendas, case files, documents...
               </Text>
-              <HandwritingCanvas
-                initialDrawings={drawings}
-                onDrawingsChange={handleDrawChange}
-                height={520}
-                showLines
-                lineSpacing={32}
-              />
-            </View>
-          )}
+            </TouchableOpacity>
 
-          {/* ── PDF ── */}
-          {section === 'pdf' && (
-            <View>
-              <TouchableOpacity
-                style={styles.attachBtn}
-                onPress={handleAttachPdf}
-              >
-                <Text style={styles.attachIcon}>📎</Text>
-                <Text style={styles.attachTitle}>Attach PDF</Text>
-                <Text style={styles.attachSub}>
-                  Meeting agendas, case files, documents…
-                </Text>
-              </TouchableOpacity>
-
-              {note?.pdfUri ? (
-                <View style={styles.attachedCard}>
-                  <Text style={styles.attachedIcon}>📄</Text>
-                  <View style={styles.attachedInfo}>
-                    <Text style={styles.attachedName}>{note.pdfName}</Text>
-                    <Text style={styles.attachedOk}>Attached ✓</Text>
-                  </View>
-                  <TouchableOpacity onPress={handleRemovePdf}>
-                    <Text style={styles.removeBtn}>✕</Text>
-                  </TouchableOpacity>
+            {note?.pdfUri ? (
+              <View style={styles.attachedCard}>
+                <Text style={styles.attachedIcon}>📄</Text>
+                <View style={styles.attachedInfo}>
+                  <Text style={styles.attachedName}>{note.pdfName}</Text>
+                  <Text style={styles.attachedOk}>Attached ✓</Text>
                 </View>
-              ) : (
-                <View style={styles.pdfEmpty}>
-                  <Text style={styles.pdfEmptyIcon}>📁</Text>
-                  <Text style={styles.pdfEmptyText}>No PDF attached yet</Text>
-                </View>
-              )}
-            </View>
-          )}
-        </ScrollView>
+                <TouchableOpacity onPress={handleRemovePdf}>
+                  <Text style={styles.removeBtn}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.pdfEmpty}>
+                <Text style={styles.pdfEmptyIcon}>📁</Text>
+                <Text style={styles.pdfEmptyText}>No PDF attached yet</Text>
+              </View>
+            )}
+          </ScrollView>
+        )}
       </KeyboardAvoidingView>
 
       {/* Save bar */}
       <TouchableOpacity
         style={styles.saveBar}
-        onPress={async () => { await save(); navigation.goBack(); }}
+        onPress={async () => {
+          await save();
+          navigation.goBack();
+        }}
       >
         <Text style={styles.saveBarText}>💾 Save & Go Back</Text>
       </TouchableOpacity>
@@ -255,10 +304,19 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
   );
 }
 
-const { height: H } = Dimensions.get('window');
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
+
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginTop: 10,
+  },
 
   titleBar: {
     paddingHorizontal: 16,
@@ -300,9 +358,13 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     fontSize: 16,
     lineHeight: 26,
-    minHeight: H * 0.5,
+    minHeight: 400,
   },
 
+  drawSection: {
+    flex: 1,
+    padding: 16,
+  },
   sectionHint: {
     color: COLORS.text,
     fontSize: 15,
