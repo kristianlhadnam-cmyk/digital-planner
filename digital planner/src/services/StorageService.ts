@@ -7,6 +7,7 @@ import {
   TodoItem,
   NoteEntry,
   DrawingPath,
+  CalendarEvent,
 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { STORAGE_KEYS } from '../utils/constants';
@@ -236,4 +237,52 @@ export const deleteNote = async (noteId: string): Promise<void> => {
   const notes = await getNotes();
   const filtered = notes.filter((n) => n.id !== noteId);
   await saveNotes(filtered);
+};
+
+// ─────────────────────────────────────────
+// CUSTOM EVENTS (Quick-Add events)
+// ─────────────────────────────────────────
+
+const CUSTOM_EVENTS_KEY = 'planner_custom_events_';
+
+export const getCustomEvents = async (dateString: string): Promise<CalendarEvent[]> => {
+  try {
+    const data = await AsyncStorage.getItem(`${CUSTOM_EVENTS_KEY}${dateString}`);
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error('Error getting custom events:', error);
+    return [];
+  }
+};
+
+export const saveCustomEvent = async (
+  dateString: string,
+  event: CalendarEvent
+): Promise<void> => {
+  try {
+    const existing = await getCustomEvents(dateString);
+    const updated = [...existing, event];
+    await AsyncStorage.setItem(
+      `${CUSTOM_EVENTS_KEY}${dateString}`,
+      JSON.stringify(updated)
+    );
+  } catch (error) {
+    console.error('Error saving custom event:', error);
+  }
+};
+
+export const deleteCustomEvent = async (
+  dateString: string,
+  eventId: string
+): Promise<void> => {
+  try {
+    const existing = await getCustomEvents(dateString);
+    const filtered = existing.filter((e) => e.id !== eventId);
+    await AsyncStorage.setItem(
+      `${CUSTOM_EVENTS_KEY}${dateString}`,
+      JSON.stringify(filtered)
+    );
+  } catch (error) {
+    console.error('Error deleting custom event:', error);
+  }
 };
