@@ -20,6 +20,11 @@ interface HandwritingCanvasProps {
   editable?: boolean;
 }
 
+// Simple ID generator (no library needed)
+const generateId = (): string => {
+  return `path_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+};
+
 export default function HandwritingCanvas({
   initialDrawings = [],
   onDrawingsChange,
@@ -52,10 +57,6 @@ export default function HandwritingCanvas({
   useEffect(() => {
     eraserRef.current = isEraser;
   }, [isEraser]);
-
-  const generateId = () => {
-    return `path_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  };
 
   const panResponder = useRef(
     PanResponder.create({
