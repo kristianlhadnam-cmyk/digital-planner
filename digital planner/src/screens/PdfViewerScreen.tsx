@@ -7,26 +7,28 @@ import {
   Dimensions,
   Alert,
   ActivityIndicator,
+  PanResponder,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import Pdf from 'react-native-pdf';
+import { WebView } from 'react-native-webview';
 import Svg, { Path } from 'react-native-svg';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { RootStackParamList, DrawingPath, PdfAnnotation, Point } from '../types';
 import { COLORS, PEN_COLORS, PEN_SIZES } from '../utils/constants';
 import CalendarHeader from '../components/CalendarHeader';
 import { getNote, updateNote } from '../services/StorageService';
-import { PanResponder } from 'react-native';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'PdfViewer'>;
   route: RouteProp<RootStackParamList, 'PdfViewer'>;
 };
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const PDF_HEIGHT = SCREEN_HEIGHT - 280;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const generateId = (): string => {
   return `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
@@ -34,17 +36,15 @@ const generateId = (): string => {
 
 export default function PdfViewerScreen({ navigation, route }: Props) {
   const { noteId, pdfUri, pdfName } = route.params;
-  
-  const [totalPages, setTotalPages] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
+
   const [annotations, setAnnotations] = useState<PdfAnnotation[]>([]);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
-  const [selectedColor, setSelectedColor] = useState(PEN_COLORS[2]); // Red by default
+  const [selectedColor, setSelectedColor] = useState(PEN_COLORS[2]);
   const [selectedSize, setSelectedSize] = useState(PEN_SIZES[1]);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [isEraser, setIsEraser] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [showToolbar, setShowToolbar] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const annotationsRef = useRef<PdfAnnotation[]>([]);
   const currentPathRef = useRef<Point[]>([]);
@@ -92,13 +92,13 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
   const updateCurrentPageDrawings = (newDrawings: DrawingPath[]) => {
     let updated = [...annotationsRef.current];
     const index = updated.findIndex(a => a.pageNumber === pageRef.current);
-    
+
     if (index >= 0) {
       updated[index] = { ...updated[index], drawings: newDrawings };
     } else {
       updated.push({ pageNumber: pageRef.current, drawings: newDrawings });
     }
-    
+
     annotationsRef.current = updated;
     setAnnotations(updated);
     saveAnnotations(updated);
@@ -119,13 +119,13 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
           const pageDrawings = annotationsRef.current.find(
             a => a.pageNumber === pageRef.current
           )?.drawings || [];
-          
+
           const filtered = pageDrawings.filter((p) => {
             return !p.points.some(
               (pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25
             );
           });
-          
+
           if (filtered.length !== pageDrawings.length) {
             updateCurrentPageDrawings(filtered);
           }
@@ -143,13 +143,13 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
           const pageDrawings = annotationsRef.current.find(
             a => a.pageNumber === pageRef.current
           )?.drawings || [];
-          
+
           const filtered = pageDrawings.filter((p) => {
             return !p.points.some(
               (pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25
             );
           });
-          
+
           if (filtered.length !== pageDrawings.length) {
             updateCurrentPageDrawings(filtered);
           }
@@ -181,7 +181,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
           const pageDrawings = annotationsRef.current.find(
             a => a.pageNumber === pageRef.current
           )?.drawings || [];
-          
+
           updateCurrentPageDrawings([...pageDrawings, newPath]);
         }
 
@@ -208,18 +208,10 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
     return d;
   };
 
-  const goToPrevPage = () => {
-    if (currentPage > 1) setCurrentPage(currentPage - 1);
-  };
-
-  const goToNextPage = () => {
-    if (currentPage < totalPages) setCurrentPage(currentPage + 1);
-  };
-
   const clearCurrentPage = () => {
     Alert.alert(
       'Clear Page',
-      `Clear all annotations on page ${currentPage}?`,
+      `Clear all annotations on this page?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -235,7 +227,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
     const pageDrawings = annotationsRef.current.find(
       a => a.pageNumber === currentPage
     )?.drawings || [];
-    
+
     if (pageDrawings.length > 0) {
       updateCurrentPageDrawings(pageDrawings.slice(0, -1));
     }
@@ -253,6 +245,77 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
       console.log('Share error:', e);
     }
   };
+
+  const handleOpenExternal = async () => {
+    try {
+      if (Platform.OS === 'android') {
+        // Get a content URI for the file
+        const contentUri = await FileSystem.getContentUriAsync(pdfUri);
+        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data: contentUri,
+          flags: 1,
+          type: 'application/pdf',
+        });
+      } else {
+        await Sharing.shareAsync(pdfUri);
+      }
+    } catch (e) {
+      console.log('Open error:', e);
+      Alert.alert('No PDF Reader', 'Please install a PDF reader app.');
+    }
+  };
+
+  const changePage = (direction: 'prev' | 'next') => {
+    Alert.prompt(
+      'Change Page',
+      `Currently on page ${currentPage}. Enter new page number:`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Go',
+          onPress: (text) => {
+            if (text) {
+              const num = parseInt(text);
+              if (!isNaN(num) && num >= 1) {
+                setCurrentPage(num);
+              }
+            }
+          },
+        },
+      ],
+      'plain-text',
+      String(direction === 'prev' ? Math.max(1, currentPage - 1) : currentPage + 1)
+    );
+  };
+
+  // HTML to display PDF in WebView
+  const pdfHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+      <style>
+        body, html {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          height: 100%;
+          background: #525252;
+          overflow: hidden;
+        }
+        iframe, embed, object {
+          width: 100%;
+          height: 100%;
+          border: none;
+        }
+      </style>
+    </head>
+    <body>
+      <iframe src="${pdfUri}" type="application/pdf"></iframe>
+    </body>
+    </html>
+  `;
 
   const currentPageDrawings = getCurrentPageDrawings();
 
@@ -276,7 +339,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
             👁️ View
           </Text>
         </TouchableOpacity>
-        
+
         <TouchableOpacity
           style={[styles.modeBtn, isDrawingMode && !isEraser && styles.modeBtnActive]}
           onPress={() => {
@@ -301,12 +364,16 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
           </Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.iconBtn} onPress={handleOpenExternal}>
+          <Text style={styles.iconText}>📂</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
           <Text style={styles.iconText}>📤</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Drawing Tools (when drawing mode) */}
+      {/* Drawing Tools */}
       {isDrawingMode && !isEraser && (
         <View style={styles.drawingTools}>
           <View style={styles.toolGroup}>
@@ -323,7 +390,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
               />
             ))}
           </View>
-          
+
           <View style={styles.toolGroup}>
             <Text style={styles.toolLabel}>Size:</Text>
             {PEN_SIZES.map((size) => (
@@ -342,7 +409,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {/* PDF Container with Overlay */}
+      {/* PDF Container with Drawing Overlay */}
       <View style={styles.pdfContainer}>
         {loading && (
           <View style={styles.loadingOverlay}>
@@ -351,25 +418,21 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        <Pdf
-          source={{ uri: pdfUri, cache: true }}
-          page={currentPage}
-          onLoadComplete={(pages) => {
-            setTotalPages(pages);
+        <WebView
+          source={{ html: pdfHtml }}
+          style={styles.webview}
+          onLoadEnd={() => setLoading(false)}
+          onError={(e) => {
+            console.log('WebView error:', e);
             setLoading(false);
           }}
-          onPageChanged={(page) => {
-            setCurrentPage(page);
-          }}
-          onError={(error) => {
-            console.log('PDF error:', error);
-            Alert.alert('Error', 'Could not load PDF: ' + String(error));
-            setLoading(false);
-          }}
-          style={styles.pdf}
-          enablePaging={true}
-          horizontal={false}
-          singlePage={true}
+          originWhitelist={['*']}
+          allowFileAccess={true}
+          allowFileAccessFromFileURLs={true}
+          allowUniversalAccessFromFileURLs={true}
+          mixedContentMode="always"
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
         />
 
         {/* Drawing Overlay */}
@@ -377,6 +440,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
           style={[
             StyleSheet.absoluteFill,
             { backgroundColor: 'transparent' },
+            !isDrawingMode && { pointerEvents: 'none' },
           ]}
           {...(isDrawingMode ? panResponder.panHandlers : {})}
           pointerEvents={isDrawingMode ? 'auto' : 'none'}
@@ -413,45 +477,53 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {/* Bottom Bar - Page Navigation */}
+      {/* Bottom Bar - Page Info */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={[styles.pageBtn, currentPage === 1 && styles.pageBtnDisabled]}
-          onPress={goToPrevPage}
-          disabled={currentPage === 1}
+          style={styles.pageBtn}
+          onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
+          disabled={currentPage <= 1}
         >
-          <Text style={styles.pageBtnText}>← Prev</Text>
+          <Text style={[styles.pageBtnText, currentPage <= 1 && styles.pageBtnDisabled]}>
+            ← Prev
+          </Text>
         </TouchableOpacity>
 
         <View style={styles.pageInfo}>
-          <Text style={styles.pageInfoText}>
-            Page {currentPage} of {totalPages}
-          </Text>
+          <Text style={styles.pageInfoText}>Annotation Page {currentPage}</Text>
           {currentPageDrawings.length > 0 && (
             <Text style={styles.annotationCount}>
-              ✏️ {currentPageDrawings.length} annotations
+              ✏️ {currentPageDrawings.length} strokes
             </Text>
           )}
         </View>
 
         <TouchableOpacity
-          style={[styles.pageBtn, currentPage === totalPages && styles.pageBtnDisabled]}
-          onPress={goToNextPage}
-          disabled={currentPage === totalPages}
+          style={styles.pageBtn}
+          onPress={() => setCurrentPage(currentPage + 1)}
         >
           <Text style={styles.pageBtnText}>Next →</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Action buttons */}
+      {/* Action buttons when drawing */}
       {isDrawingMode && (
         <View style={styles.actionBar}>
           <TouchableOpacity style={styles.actionBtn} onPress={undoLast}>
             <Text style={styles.actionBtnText}>↩️ Undo</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionBtn} onPress={clearCurrentPage}>
-            <Text style={styles.actionBtnText}>🗑️ Clear Page</Text>
+            <Text style={styles.actionBtnText}>🗑️ Clear</Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Help banner for first-time users */}
+      {!isDrawingMode && currentPageDrawings.length === 0 && (
+        <View style={styles.helpBanner}>
+          <Text style={styles.helpText}>
+            💡 Tap "✏️ Draw" to annotate this PDF, or "📂" to open in another app
+          </Text>
         </View>
       )}
     </SafeAreaView>
@@ -473,7 +545,7 @@ const styles = StyleSheet.create({
   modeBtn: {
     flex: 1,
     paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     backgroundColor: COLORS.secondary,
     borderRadius: 8,
     alignItems: 'center',
@@ -486,7 +558,7 @@ const styles = StyleSheet.create({
   },
   modeBtnText: {
     color: COLORS.textSecondary,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
   modeBtnTextActive: {
@@ -494,7 +566,7 @@ const styles = StyleSheet.create({
   },
   iconBtn: {
     paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     backgroundColor: COLORS.secondary,
     borderRadius: 8,
     alignItems: 'center',
@@ -559,9 +631,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#525252',
     position: 'relative',
   },
-  pdf: {
+  webview: {
     flex: 1,
-    width: SCREEN_WIDTH,
+    backgroundColor: '#525252',
   },
   loadingOverlay: {
     position: 'absolute',
@@ -596,13 +668,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accent,
     borderRadius: 8,
   },
-  pageBtnDisabled: {
-    opacity: 0.3,
-  },
   pageBtnText: {
     color: COLORS.text,
     fontSize: 14,
     fontWeight: '600',
+  },
+  pageBtnDisabled: {
+    opacity: 0.3,
   },
   pageInfo: {
     alignItems: 'center',
@@ -641,5 +713,18 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  helpBanner: {
+    backgroundColor: COLORS.todayBg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.highlight,
+  },
+  helpText: {
+    color: COLORS.text,
+    fontSize: 12,
+    textAlign: 'center',
   },
 });
