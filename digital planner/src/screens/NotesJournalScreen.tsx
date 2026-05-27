@@ -1,5 +1,3 @@
-// FILE: digital-planner/src/screens/NotesJournalScreen.tsx
-
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -35,14 +33,62 @@ export default function NotesJournalScreen({ navigation }: Props) {
     }, [])
   );
 
-  const load = async () => setNotes(await getNotes());
+  const load = async () => {
+    try {
+      const data = await getNotes();
+      setNotes(data || []);
+    } catch (e) {
+      console.log('Load error:', e);
+      setNotes([]);
+    }
+  };
 
-  const handleCreate = async () => {
-    if (!newTitle.trim()) return;
-    const note = await createNote(newTitle.trim(), tab);
+  // FIXED: Synchronous flow with better error handling
+  const handleCreatePress = () => {
+    const titleToUse = newTitle.trim();
+    
+    if (!titleToUse) {
+      Alert.alert('Title Required', 'Please enter a title first.');
+      return;
+    }
+
+    const noteType = tab;
+    
+    // Reset form immediately
     setNewTitle('');
     setShowForm(false);
-    navigation.navigate('NoteEditor', { noteId: note.id, type: note.type });
+
+    // Create and navigate in async function
+    createAndNavigate(titleToUse, noteType);
+  };
+
+  const createAndNavigate = async (title: string, noteType: 'note' | 'journal') => {
+    try {
+      const note = await createNote(title, noteType);
+      
+      if (note && note.id) {
+        // Reload list to show new note
+        await load();
+        
+        // Navigate to editor
+        navigation.navigate('NoteEditor', { 
+          noteId: note.id, 
+          type: noteType 
+        });
+      } else {
+        Alert.alert('Error', 'Could not create note. Please try again.');
+      }
+    } catch (e) {
+      console.log('Create note error:', e);
+      Alert.alert('Error', 'Could not create note: ' + String(e));
+    }
+  };
+
+  const handleOpenNote = (noteId: string, noteType: 'note' | 'journal') => {
+    navigation.navigate('NoteEditor', {
+      noteId: noteId,
+      type: noteType,
+    });
   };
 
   const handleDelete = (id: string, title: string) =>
@@ -52,8 +98,12 @@ export default function NotesJournalScreen({ navigation }: Props) {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await deleteNote(id);
-          await load();
+          try {
+            await deleteNote(id);
+            await load();
+          } catch (e) {
+            console.log('Delete error:', e);
+          }
         },
       },
     ]);
@@ -69,52 +119,65 @@ export default function NotesJournalScreen({ navigation }: Props) {
 
       {/* Tabs */}
       <View style={styles.tabs}>
-        {(['note', 'journal'] as const).map((t) => (
-          <TouchableOpacity
-            key={t}
-            style={[styles.tab, tab === t && styles.activeTab]}
-            onPress={() => setTab(t)}
-          >
-            <Text
-              style={[styles.tabText, tab === t && styles.activeTabText]}
-            >
-              {t === 'note' ? '📝 Notes' : '📓 Journal'}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <TouchableOpacity
+          style={[styles.tab, tab === 'note' && styles.activeTab]}
+          onPress={() => setTab('note')}
+        >
+          <Text style={[styles.tabText, tab === 'note' && styles.activeTabText]}>
+            📝 Notes
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, tab === 'journal' && styles.activeTab]}
+          onPress={() => setTab('journal')}
+        >
+          <Text style={[styles.tabText, tab === 'journal' && styles.activeTabText]}>
+            📓 Journal
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Create button / form */}
+        {/* Create form */}
         {showForm ? (
           <View style={styles.form}>
+            <Text style={styles.formLabel}>
+              New {tab === 'note' ? 'Note' : 'Journal Entry'}
+            </Text>
             <TextInput
               style={styles.input}
-              placeholder={
-                tab === 'note' ? 'Note title...' : 'Journal entry title...'
-              }
+              placeholder="Enter title..."
               placeholderTextColor={COLORS.textSecondary}
               value={newTitle}
               onChangeText={setNewTitle}
-              onSubmitEditing={handleCreate}
               autoFocus
+              returnKeyType="done"
             />
             <View style={styles.formBtns}>
-              <TouchableOpacity style={styles.btnCreate} onPress={handleCreate}>
-                <Text style={styles.btnCreateText}>Create</Text>
+              <TouchableOpacity
+                style={styles.btnCreate}
+                onPress={handleCreatePress}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.btnCreateText}>✓ Create</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.btnCancel}
-                onPress={() => { setShowForm(false); setNewTitle(''); }}
+                onPress={() => {
+                  setNewTitle('');
+                  setShowForm(false);
+                }}
+                activeOpacity={0.7}
               >
-                <Text style={styles.btnCancelText}>Cancel</Text>
+                <Text style={styles.btnCancelText}>✕ Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
         ) : (
-          <TouchableOpacity
-            style={styles.addBtn}
+          <TouchableOpacity 
+            style={styles.addBtn} 
             onPress={() => setShowForm(true)}
+            activeOpacity={0.7}
           >
             <Text style={styles.addBtnText}>
               + New {tab === 'note' ? 'Note' : 'Journal Entry'}
@@ -122,55 +185,56 @@ export default function NotesJournalScreen({ navigation }: Props) {
           </TouchableOpacity>
         )}
 
-        {/* List */}
+        {/* Notes list */}
         {filtered.map((note) => (
-          <TouchableOpacity
-            key={note.id}
-            style={styles.noteCard}
-            onPress={() =>
-              navigation.navigate('NoteEditor', {
-                noteId: note.id,
-                type: note.type,
-              })
-            }
-            activeOpacity={0.75}
-          >
-            <Text style={styles.noteIcon}>
-              {note.pdfUri ? '📎' : tab === 'note' ? '📝' : '📓'}
-            </Text>
-            <View style={styles.noteInfo}>
-              <Text style={styles.noteTitle}>{note.title}</Text>
-              <Text style={styles.noteDate}>
-                {format(new Date(note.updatedAt), 'MMM d, yyyy · HH:mm')}
-              </Text>
-              {note.textContent ? (
-                <Text style={styles.notePreview} numberOfLines={2}>
-                  {note.textContent}
-                </Text>
-              ) : null}
-              {note.pdfName ? (
-                <Text style={styles.pdfTag}>📄 {note.pdfName}</Text>
-              ) : null}
-              {(note.drawings?.length ?? 0) > 0 ? (
-                <Text style={styles.drawTag}>✏️ Has handwriting</Text>
-              ) : null}
-            </View>
+          <View key={note.id} style={styles.noteCard}>
             <TouchableOpacity
+              style={styles.noteContent}
+              onPress={() => handleOpenNote(note.id, note.type)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.noteIcon}>
+                {note.pdfUri ? '📎' : tab === 'note' ? '📝' : '📓'}
+              </Text>
+              <View style={styles.noteInfo}>
+                <Text style={styles.noteTitle}>{note.title}</Text>
+                <Text style={styles.noteDate}>
+                  {format(new Date(note.updatedAt), 'MMM d, yyyy · HH:mm')}
+                </Text>
+                {note.textContent ? (
+                  <Text style={styles.notePreview} numberOfLines={2}>
+                    {note.textContent}
+                  </Text>
+                ) : null}
+                {note.pdfName ? (
+                  <Text style={styles.pdfTag}>📄 {note.pdfName}</Text>
+                ) : null}
+                {(note.drawings?.length ?? 0) > 0 ? (
+                  <Text style={styles.drawTag}>
+                    ✏️ {note.drawings.length} drawings
+                  </Text>
+                ) : null}
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.deleteBtn}
               onPress={() => handleDelete(note.id, note.title)}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
             >
               <Text style={styles.trashIcon}>🗑️</Text>
             </TouchableOpacity>
-          </TouchableOpacity>
+          </View>
         ))}
 
         {filtered.length === 0 && !showForm && (
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>
-              {tab === 'note' ? '📝' : '📓'}
-            </Text>
+            <Text style={styles.emptyIcon}>{tab === 'note' ? '📝' : '📓'}</Text>
             <Text style={styles.emptyText}>
               No {tab === 'note' ? 'notes' : 'journal entries'} yet
+            </Text>
+            <Text style={styles.emptySubtext}>
+              Tap the button above to create one
             </Text>
           </View>
         )}
@@ -210,44 +274,74 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: COLORS.highlight,
+  },
+  formLabel: {
+    color: COLORS.highlight,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 10,
   },
   input: {
     backgroundColor: COLORS.background,
     borderRadius: 8,
-    padding: 12,
+    padding: 14,
     color: COLORS.text,
     fontSize: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
-  formBtns: { flexDirection: 'row', gap: 10 },
+  formBtns: { 
+    flexDirection: 'row', 
+    gap: 10,
+  },
   btnCreate: {
     backgroundColor: COLORS.success,
     borderRadius: 8,
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 14,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  btnCreateText: { color: COLORS.white, fontWeight: '700' },
+  btnCreateText: { 
+    color: COLORS.white, 
+    fontWeight: '700',
+    fontSize: 15,
+  },
   btnCancel: {
     backgroundColor: COLORS.secondary,
     borderRadius: 8,
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
   },
-  btnCancelText: { color: COLORS.textSecondary, fontWeight: '600' },
+  btnCancelText: { 
+    color: COLORS.textSecondary, 
+    fontWeight: '600',
+    fontSize: 15,
+  },
 
   noteCard: {
     backgroundColor: COLORS.cardBg,
     borderRadius: 12,
-    padding: 14,
     marginBottom: 10,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    overflow: 'hidden',
+  },
+  noteContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 14,
     gap: 12,
   },
   noteIcon: { fontSize: 26, marginTop: 2 },
@@ -262,9 +356,15 @@ const styles = StyleSheet.create({
   },
   pdfTag: { color: COLORS.warning, fontSize: 11, fontWeight: '600', marginTop: 4 },
   drawTag: { color: COLORS.accent, fontSize: 11, fontWeight: '600', marginTop: 2 },
-  trashIcon: { fontSize: 18, padding: 4 },
+  deleteBtn: { padding: 14 },
+  trashIcon: { fontSize: 18 },
 
   empty: { alignItems: 'center', paddingVertical: 60 },
   emptyIcon: { fontSize: 48, marginBottom: 14 },
   emptyText: { color: COLORS.text, fontSize: 18, fontWeight: '600' },
+  emptySubtext: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    marginTop: 4,
+  },
 });
