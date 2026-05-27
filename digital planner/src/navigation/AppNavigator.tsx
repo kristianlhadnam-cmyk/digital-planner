@@ -1,5 +1,3 @@
-// FILE: digital-planner/src/navigation/AppNavigator.tsx
-
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -14,6 +12,7 @@ import DailyViewScreen from '../screens/DailyViewScreen';
 import TodoListScreen from '../screens/TodoListScreen';
 import NotesJournalScreen from '../screens/NotesJournalScreen';
 import NoteEditorScreen from '../screens/NoteEditorScreen';
+import PdfViewerScreen from '../screens/PdfViewerScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -36,6 +35,7 @@ export default function AppNavigator() {
         <Stack.Screen name="TodoList" component={TodoListScreen} />
         <Stack.Screen name="NotesJournal" component={NotesJournalScreen} />
         <Stack.Screen name="NoteEditor" component={NoteEditorScreen} />
+        <Stack.Screen name="PdfViewer" component={PdfViewerScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
