@@ -1,5 +1,3 @@
-// FILE: digital-planner/src/services/StorageService.ts
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DaySchedule,
@@ -9,8 +7,19 @@ import {
   DrawingPath,
   CalendarEvent,
 } from '../types';
-import { v4 as uuidv4 } from 'uuid';
-import { STORAGE_KEYS } from '../utils/constants';
+
+// Simple ID generator (works on all platforms — no library needed)
+const generateId = (): string => {
+  return `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
+const STORAGE_KEYS = {
+  SCHEDULES: 'planner_schedules',
+  TODO_LISTS: 'planner_todo_lists',
+  NOTES: 'planner_notes',
+  DAY_DRAWINGS: 'planner_day_drawings_',
+  SETTINGS: 'planner_settings',
+};
 
 // ─────────────────────────────────────────
 // DAY DRAWINGS
@@ -103,7 +112,7 @@ export const saveTodoLists = async (lists: TodoList[]): Promise<void> => {
 export const createTodoList = async (name: string): Promise<TodoList> => {
   const lists = await getTodoLists();
   const newList: TodoList = {
-    id: uuidv4(),
+    id: generateId(),
     name,
     items: [],
     createdAt: new Date().toISOString(),
@@ -123,7 +132,7 @@ export const addTodoItem = async (
   if (listIndex === -1) throw new Error('List not found');
 
   const newItem: TodoItem = {
-    id: uuidv4(),
+    id: generateId(),
     text,
     completed: false,
     createdAt: new Date().toISOString(),
@@ -204,7 +213,7 @@ export const createNote = async (
 ): Promise<NoteEntry> => {
   const notes = await getNotes();
   const newNote: NoteEntry = {
-    id: uuidv4(),
+    id: generateId(),
     title,
     type,
     createdAt: new Date().toISOString(),
@@ -245,7 +254,9 @@ export const deleteNote = async (noteId: string): Promise<void> => {
 
 const CUSTOM_EVENTS_KEY = 'planner_custom_events_';
 
-export const getCustomEvents = async (dateString: string): Promise<CalendarEvent[]> => {
+export const getCustomEvents = async (
+  dateString: string
+): Promise<CalendarEvent[]> => {
   try {
     const data = await AsyncStorage.getItem(`${CUSTOM_EVENTS_KEY}${dateString}`);
     return data ? JSON.parse(data) : [];
