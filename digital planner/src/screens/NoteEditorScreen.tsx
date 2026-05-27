@@ -40,7 +40,7 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [canvasKey, setCanvasKey] = useState(0);
-  
+
   const isInitialLoad = useRef(true);
   const isJournal = type === 'journal';
 
@@ -56,7 +56,7 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
     if (!noteId) return;
     setLoading(true);
     isInitialLoad.current = true;
-    
+
     try {
       const data = await getNote(noteId);
       if (data) {
@@ -69,7 +69,7 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
     } catch (e) {
       console.log('Load note error:', e);
     }
-    
+
     setLoading(false);
     setTimeout(() => {
       isInitialLoad.current = false;
@@ -87,22 +87,21 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
     setSaving(false);
   }, [noteId, title, text, drawings]);
 
-  // Auto-save when text/title changes
   useEffect(() => {
     if (isInitialLoad.current) return;
     if (!noteId) return;
-    
+
     const timer = setTimeout(() => {
       save();
     }, 1000);
-    
+
     return () => clearTimeout(timer);
   }, [title, text]);
 
   const handleDrawChange = useCallback(
     async (newDrawings: DrawingPath[]) => {
       if (isInitialLoad.current) return;
-      
+
       setDrawings(newDrawings);
       if (noteId) {
         try {
@@ -134,22 +133,45 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         await updateNote(noteId, { pdfUri: dest, pdfName: fileName });
         await loadNote();
       }
-      Alert.alert('✅ Attached', `${fileName} has been attached.`);
+      Alert.alert(
+        '✅ Attached',
+        `${fileName} has been attached.`,
+        [
+          { text: 'OK' },
+          {
+            text: 'Open Now',
+            onPress: () => handleOpenPdf(dest, fileName),
+          },
+        ]
+      );
     } catch (e) {
       console.log('PDF error:', e);
       Alert.alert('Error', 'Could not attach PDF.');
     }
   };
 
+  const handleOpenPdf = (uri: string, name: string) => {
+    if (!noteId) return;
+    navigation.navigate('PdfViewer', {
+      noteId,
+      pdfUri: uri,
+      pdfName: name,
+    });
+  };
+
   const handleRemovePdf = () =>
-    Alert.alert('Remove PDF?', 'This removes the attached PDF.', [
+    Alert.alert('Remove PDF?', 'This removes the attached PDF and all annotations.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
           if (noteId) {
-            await updateNote(noteId, { pdfUri: undefined, pdfName: undefined });
+            await updateNote(noteId, { 
+              pdfUri: undefined, 
+              pdfName: undefined,
+              pdfAnnotations: undefined,
+            });
             await loadNote();
           }
         },
@@ -184,7 +206,6 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         title={isJournal ? 'Journal Entry' : 'Note'}
       />
 
-      {/* Title bar */}
       <View style={styles.titleBar}>
         <TextInput
           style={styles.titleInput}
@@ -195,14 +216,11 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         />
         {note && (
           <Text style={styles.savedLabel}>
-            {saving
-              ? 'Saving...'
-              : `Saved ${format(new Date(note.updatedAt), 'HH:mm')}`}
+            {saving ? 'Saving...' : `Saved ${format(new Date(note.updatedAt), 'HH:mm')}`}
           </Text>
         )}
       </View>
 
-      {/* Section tabs */}
       <View style={styles.tabs}>
         {SECTIONS.map((s) => (
           <TouchableOpacity
@@ -222,7 +240,6 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={120}
       >
-        {/* TEXT SECTION */}
         {section === 'text' && (
           <ScrollView contentContainerStyle={styles.scroll}>
             <TextInput
@@ -241,7 +258,6 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
           </ScrollView>
         )}
 
-        {/* DRAW SECTION */}
         {section === 'draw' && (
           <View style={styles.drawSection}>
             <Text style={styles.sectionHint}>
@@ -258,39 +274,73 @@ export default function NoteEditorScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        {/* PDF SECTION */}
         {section === 'pdf' && (
           <ScrollView contentContainerStyle={styles.scroll}>
-            <TouchableOpacity style={styles.attachBtn} onPress={handleAttachPdf}>
-              <Text style={styles.attachIcon}>📎</Text>
-              <Text style={styles.attachTitle}>Attach PDF</Text>
-              <Text style={styles.attachSub}>
-                Meeting agendas, case files, documents...
-              </Text>
-            </TouchableOpacity>
-
             {note?.pdfUri ? (
-              <View style={styles.attachedCard}>
-                <Text style={styles.attachedIcon}>📄</Text>
-                <View style={styles.attachedInfo}>
-                  <Text style={styles.attachedName}>{note.pdfName}</Text>
-                  <Text style={styles.attachedOk}>Attached ✓</Text>
-                </View>
-                <TouchableOpacity onPress={handleRemovePdf}>
-                  <Text style={styles.removeBtn}>✕</Text>
+              <>
+                {/* PDF Already Attached - Show Open Button */}
+                <TouchableOpacity
+                  style={styles.openPdfBtn}
+                  onPress={() => handleOpenPdf(note.pdfUri!, note.pdfName || 'PDF')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.openPdfIcon}>📂</Text>
+                  <Text style={styles.openPdfTitle}>Open & Edit PDF</Text>
+                  <Text style={styles.openPdfSub}>
+                    View pages and add annotations
+                  </Text>
                 </TouchableOpacity>
-              </View>
+
+                <View style={styles.attachedCard}>
+                  <Text style={styles.attachedIcon}>📄</Text>
+                  <View style={styles.attachedInfo}>
+                    <Text style={styles.attachedName}>{note.pdfName}</Text>
+                    <Text style={styles.attachedOk}>Attached ✓</Text>
+                    {(note.pdfAnnotations?.length ?? 0) > 0 && (
+                      <Text style={styles.annotationInfo}>
+                        ✏️ Annotations on {note.pdfAnnotations!.length} page(s)
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity onPress={handleRemovePdf}>
+                    <Text style={styles.removeBtn}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity 
+                  style={styles.changeBtn} 
+                  onPress={handleAttachPdf}
+                >
+                  <Text style={styles.changeBtnText}>
+                    🔄 Replace with different PDF
+                  </Text>
+                </TouchableOpacity>
+              </>
             ) : (
-              <View style={styles.pdfEmpty}>
-                <Text style={styles.pdfEmptyIcon}>📁</Text>
-                <Text style={styles.pdfEmptyText}>No PDF attached yet</Text>
-              </View>
+              <>
+                {/* No PDF - Show Attach Button */}
+                <TouchableOpacity style={styles.attachBtn} onPress={handleAttachPdf}>
+                  <Text style={styles.attachIcon}>📎</Text>
+                  <Text style={styles.attachTitle}>Attach PDF</Text>
+                  <Text style={styles.attachSub}>
+                    Meeting agendas, case files, documents...
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={styles.pdfEmpty}>
+                  <Text style={styles.pdfEmptyIcon}>📁</Text>
+                  <Text style={styles.pdfEmptyText}>No PDF attached yet</Text>
+                  <Text style={styles.pdfEmptyHint}>
+                    Tap "Attach PDF" above to add one.{'\n'}
+                    Then you can view and annotate it!
+                  </Text>
+                </View>
+              </>
             )}
           </ScrollView>
         )}
       </KeyboardAvoidingView>
 
-      {/* Save bar */}
       <TouchableOpacity
         style={styles.saveBar}
         onPress={async () => {
@@ -373,6 +423,27 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
+  // PDF section
+  openPdfBtn: {
+    backgroundColor: COLORS.highlight,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  openPdfIcon: { fontSize: 48, marginBottom: 8 },
+  openPdfTitle: { 
+    color: COLORS.white, 
+    fontSize: 18, 
+    fontWeight: '800' 
+  },
+  openPdfSub: { 
+    color: COLORS.white, 
+    fontSize: 13, 
+    marginTop: 4,
+    opacity: 0.9,
+  },
+
   attachBtn: {
     backgroundColor: COLORS.cardBg,
     borderRadius: 16,
@@ -401,16 +472,48 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.success,
     gap: 12,
+    marginBottom: 12,
   },
   attachedIcon: { fontSize: 30 },
   attachedInfo: { flex: 1 },
   attachedName: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
   attachedOk: { color: COLORS.success, fontSize: 12, marginTop: 2 },
+  annotationInfo: { 
+    color: COLORS.highlight, 
+    fontSize: 11, 
+    marginTop: 4,
+    fontWeight: '600',
+  },
   removeBtn: { color: COLORS.error, fontSize: 18, fontWeight: '700', padding: 6 },
+
+  changeBtn: {
+    backgroundColor: COLORS.secondary,
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
+  changeBtnText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 
   pdfEmpty: { alignItems: 'center', paddingVertical: 40 },
   pdfEmptyIcon: { fontSize: 40, marginBottom: 10 },
-  pdfEmptyText: { color: COLORS.textSecondary, fontSize: 15 },
+  pdfEmptyText: { 
+    color: COLORS.text, 
+    fontSize: 16, 
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  pdfEmptyHint: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
 
   saveBar: {
     backgroundColor: COLORS.accent,
