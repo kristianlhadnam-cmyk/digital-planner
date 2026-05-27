@@ -1,13 +1,10 @@
-// FILE: digital-planner/src/screens/DailyViewScreen.tsx
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -38,28 +35,67 @@ export default function DailyViewScreen({ navigation, route }: Props) {
     'schedule'
   );
   const [loading, setLoading] = useState(true);
+  const [canvasKey, setCanvasKey] = useState(0);
+  
+  const drawingsRef = useRef<DrawingPath[]>([]);
+  const isInitialLoad = useRef(true);
+  const saveTimeoutRef = useRef<any>(null);
 
   useEffect(() => {
     loadData();
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, [date]);
 
   const loadData = async () => {
     setLoading(true);
-    const saved = await getDayDrawings(date);
-    setDrawings(saved);
+    isInitialLoad.current = true;
+    
+    try {
+      const saved = await getDayDrawings(date);
+      drawingsRef.current = saved || [];
+      setDrawings(saved || []);
+      setCanvasKey(prev => prev + 1);
+    } catch (e) {
+      console.log('Load drawings error:', e);
+      setDrawings([]);
+    }
+    
     try {
       const cal = await getEventsForDate(date);
       setEvents(cal);
     } catch {
       setEvents([]);
     }
+    
     setLoading(false);
+    setTimeout(() => {
+      isInitialLoad.current = false;
+    }, 500);
   };
 
   const handleDrawChange = useCallback(
-    async (newDrawings: DrawingPath[]) => {
-      setDrawings(newDrawings);
-      await saveDayDrawings(date, newDrawings);
+    (newDrawings: DrawingPath[]) => {
+      if (isInitialLoad.current) {
+        return;
+      }
+      
+      drawingsRef.current = newDrawings;
+      
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      
+      saveTimeoutRef.current = setTimeout(async () => {
+        try {
+          await saveDayDrawings(date, newDrawings);
+        } catch (e) {
+          console.log('Save drawings error:', e);
+        }
+      }, 500);
     },
     [date]
   );
@@ -99,7 +135,6 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         title={`${dayData.dayName.slice(0, 3)} ${dayData.dayOfMonth}`}
       />
 
-      {/* Day nav */}
       <View style={styles.dayNav}>
         <TouchableOpacity
           style={styles.dayNavBtn}
@@ -136,7 +171,6 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* Quick actions */}
       <View style={styles.quickActions}>
         <NavigationButton
           title="✅ To-Do"
@@ -155,7 +189,6 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         />
       </View>
 
-      {/* Tabs */}
       <View style={styles.tabs}>
         {(['schedule', 'handwrite'] as const).map((tab) => (
           <TouchableOpacity
@@ -175,11 +208,9 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* ── SCHEDULE TAB ── */}
-        {activeTab === 'schedule' && (
+      {activeTab === 'schedule' ? (
+        <ScrollView contentContainerStyle={styles.scroll}>
           <View>
-            {/* All-day events */}
             {events
               .filter((e) => e.allDay)
               .map((e) => (
@@ -195,7 +226,6 @@ export default function DailyViewScreen({ navigation, route }: Props) {
                 </View>
               ))}
 
-            {/* Hourly */}
             {hours.map((hour) => {
               const evts = eventsAtHour(hour);
               return (
@@ -242,24 +272,24 @@ export default function DailyViewScreen({ navigation, route }: Props) {
               </View>
             )}
           </View>
-        )}
-
-        {/* ── HANDWRITE TAB ── */}
-        {activeTab === 'handwrite' && (
-          <View>
-            <Text style={styles.canvasLabel}>
-              ✏️ Write your appointments & notes below
-            </Text>
+        </ScrollView>
+      ) : (
+        <View style={styles.handwriteContainer}>
+          <Text style={styles.canvasLabel}>
+            ✏️ Write your appointments & notes below
+          </Text>
+          {!loading && (
             <HandwritingCanvas
+              key={`canvas-${date}-${canvasKey}`}
               initialDrawings={drawings}
               onDrawingsChange={handleDrawChange}
               height={520}
               showLines
               lineSpacing={32}
             />
-          </View>
-        )}
-      </ScrollView>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -318,6 +348,11 @@ const styles = StyleSheet.create({
   activeTabText: { color: COLORS.text },
 
   scroll: { padding: 12, paddingBottom: 40 },
+
+  handwriteContainer: {
+    flex: 1,
+    padding: 12,
+  },
 
   allDayEvent: {
     backgroundColor: COLORS.cardBg,
