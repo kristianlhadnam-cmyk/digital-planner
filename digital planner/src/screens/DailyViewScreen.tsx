@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -26,6 +27,9 @@ type Props = {
 };
 
 type TabType = 'combined' | 'schedule' | 'handwrite';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const CANVAS_HEIGHT = 520;
 
 export default function DailyViewScreen({ navigation, route }: Props) {
   const { date } = route.params;
@@ -205,59 +209,69 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* COMBINED TAB - Schedule with handwriting overlay */}
+      {/* ───────────────────────────────────────── */}
+      {/* COMBINED TAB - Schedule + Writing Overlay */}
+      {/* ───────────────────────────────────────── */}
       {activeTab === 'combined' && (
-        <ScrollView contentContainerStyle={styles.scroll}>
-          <Text style={styles.combinedHint}>
-            📋 Calendar events + ✏️ Your handwriting (switch to "Write" tab to add notes)
-          </Text>
+        <View style={{ flex: 1 }}>
+          <View style={styles.combinedHintBar}>
+            <Text style={styles.combinedHintText}>
+              📋 Calendar + ✏️ Your handwriting overlay
+              {drawings.length > 0 ? `  •  ${drawings.length} strokes` : '  •  No writing yet'}
+            </Text>
+          </View>
 
-          <View style={styles.combinedContainer}>
-            {/* Schedule background */}
-            <View>
-              {events.filter((e) => e.allDay).map((e) => (
-                <View
-                  key={e.id}
-                  style={[styles.allDayEvent, { borderLeftColor: e.color ?? COLORS.accent }]}
-                >
-                  <Text style={styles.allDayBadge}>ALL DAY</Text>
-                  <Text style={styles.allDayTitle}>{e.title}</Text>
-                </View>
-              ))}
-
-              {hours.map((hour) => {
-                const evts = eventsAtHour(hour);
-                return (
-                  <View key={hour} style={styles.hourRow}>
-                    <View style={styles.hourLabel}>
-                      <Text style={styles.hourText}>{hour}</Text>
-                    </View>
-                    <View style={styles.hourContent}>
-                      {evts.map((e) => (
-                        <View
-                          key={e.id}
-                          style={[
-                            styles.scheduleEvent,
-                            { borderLeftColor: e.color ?? COLORS.accent },
-                          ]}
-                        >
-                          <Text style={styles.evtTime}>
-                            {format(new Date(e.startDate), 'HH:mm')} -{' '}
-                            {format(new Date(e.endDate), 'HH:mm')}
-                          </Text>
-                          <Text style={styles.evtTitle}>{e.title}</Text>
-                        </View>
-                      ))}
-                    </View>
+          <ScrollView contentContainerStyle={styles.combinedScroll}>
+            <View style={styles.combinedWrapper}>
+              {/* LAYER 1: Schedule background */}
+              <View style={styles.scheduleBackground}>
+                {events.filter((e) => e.allDay).map((e) => (
+                  <View
+                    key={e.id}
+                    style={[styles.allDayEvent, { borderLeftColor: e.color ?? COLORS.accent }]}
+                  >
+                    <Text style={styles.allDayBadge}>ALL DAY</Text>
+                    <Text style={styles.allDayTitle}>{e.title}</Text>
                   </View>
-                );
-              })}
-            </View>
+                ))}
 
-            {/* Handwriting overlay (read-only display) */}
-            {drawings.length > 0 && (
-              <View style={styles.handwritingOverlay} pointerEvents="none">
-                <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+                {hours.map((hour) => {
+                  const evts = eventsAtHour(hour);
+                  return (
+                    <View key={hour} style={styles.hourRow}>
+                      <View style={styles.hourLabel}>
+                        <Text style={styles.hourText}>{hour}</Text>
+                      </View>
+                      <View style={styles.hourContent}>
+                        {evts.map((e) => (
+                          <View
+                            key={e.id}
+                            style={[
+                              styles.scheduleEvent,
+                              { borderLeftColor: e.color ?? COLORS.accent },
+                            ]}
+                          >
+                            <Text style={styles.evtTime}>
+                              {format(new Date(e.startDate), 'HH:mm')} -{' '}
+                              {format(new Date(e.endDate), 'HH:mm')}
+                            </Text>
+                            <Text style={styles.evtTitle}>{e.title}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+
+              {/* LAYER 2: Handwriting overlay on top */}
+              {drawings.length > 0 && (
+                <Svg
+                  width={SCREEN_WIDTH}
+                  height={CANVAS_HEIGHT}
+                  style={styles.svgOverlay}
+                  pointerEvents="none"
+                >
                   {drawings.map((path) => (
                     <Path
                       key={path.id}
@@ -267,30 +281,32 @@ export default function DailyViewScreen({ navigation, route }: Props) {
                       fill="none"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      opacity={0.85}
+                      opacity={0.9}
                     />
                   ))}
                 </Svg>
-              </View>
-            )}
+              )}
 
-            {events.length === 0 && drawings.length === 0 && !loading && (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>📅</Text>
-                <Text style={styles.emptyText}>No events or notes today</Text>
-                <TouchableOpacity
-                  style={styles.openCalBtn}
-                  onPress={() => setActiveTab('handwrite')}
-                >
-                  <Text style={styles.openCalBtnText}>✏️ Start Writing</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </ScrollView>
+              {events.length === 0 && drawings.length === 0 && !loading && (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyIcon}>📅</Text>
+                  <Text style={styles.emptyText}>Nothing here yet</Text>
+                  <TouchableOpacity
+                    style={styles.openCalBtn}
+                    onPress={() => setActiveTab('handwrite')}
+                  >
+                    <Text style={styles.openCalBtnText}>✏️ Start Writing</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        </View>
       )}
 
-      {/* SCHEDULE TAB - Calendar events only */}
+      {/* ───────────────────────────────────────── */}
+      {/* SCHEDULE TAB - Calendar events only      */}
+      {/* ───────────────────────────────────────── */}
       {activeTab === 'schedule' && (
         <ScrollView contentContainerStyle={styles.scroll}>
           <View>
@@ -346,7 +362,9 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         </ScrollView>
       )}
 
-      {/* HANDWRITE TAB - Writing canvas */}
+      {/* ───────────────────────────────────────── */}
+      {/* HANDWRITE TAB - Drawing canvas           */}
+      {/* ───────────────────────────────────────── */}
       {activeTab === 'handwrite' && (
         <View style={styles.handwriteContainer}>
           <Text style={styles.canvasLabel}>
@@ -357,7 +375,7 @@ export default function DailyViewScreen({ navigation, route }: Props) {
               key={`canvas-${date}-${canvasKey}`}
               initialDrawings={drawings}
               onDrawingsChange={handleDrawChange}
-              height={520}
+              height={CANVAS_HEIGHT}
               showLines
               lineSpacing={32}
             />
@@ -419,23 +437,38 @@ const styles = StyleSheet.create({
 
   scroll: { padding: 12, paddingBottom: 40 },
 
-  combinedHint: {
-    color: COLORS.textSecondary,
+  combinedHintBar: {
+    backgroundColor: COLORS.todayBg,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.highlight,
+  },
+  combinedHintText: {
+    color: COLORS.text,
     fontSize: 12,
     textAlign: 'center',
-    marginBottom: 10,
-    fontStyle: 'italic',
+    fontWeight: '600',
   },
-  combinedContainer: {
+  combinedScroll: {
+    padding: 12,
+    paddingBottom: 40,
+  },
+  combinedWrapper: {
     position: 'relative',
-    minHeight: 800,
+    minHeight: CANVAS_HEIGHT,
+    width: '100%',
   },
-  handwritingOverlay: {
+  scheduleBackground: {
+    width: '100%',
+  },
+  svgOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
+    width: '100%',
+    height: CANVAS_HEIGHT,
   },
 
   handwriteContainer: {
