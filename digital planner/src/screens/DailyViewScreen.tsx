@@ -5,20 +5,28 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
+  TextInput,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import Svg, { Path } from 'react-native-svg';
 import { format, startOfWeek } from 'date-fns';
-import { RootStackParamList, DrawingPath, CalendarEvent, Point } from '../types';
+import { RootStackParamList, DrawingPath, CalendarEvent } from '../types';
 import { COLORS } from '../utils/constants';
 import { getDayData, getHoursOfDay, getPrevDate, getNextDate } from '../utils/dateUtils';
 import CalendarHeader from '../components/CalendarHeader';
 import HandwritingCanvas from '../components/HandwritingCanvas';
 import NavigationButton from '../components/NavigationButton';
-import { getDayDrawings, saveDayDrawings } from '../services/StorageService';
+import { 
+  getDayDrawings, 
+  saveDayDrawings,
+  getCustomEvents,
+  saveCustomEvent,
+  deleteCustomEvent,
+} from '../services/StorageService';
 import { getEventsForDate, openExternalCalendar } from '../services/CalendarService';
 
 type Props = {
@@ -26,10 +34,7 @@ type Props = {
   route: RouteProp<RootStackParamList, 'DailyView'>;
 };
 
-type TabType = 'combined' | 'schedule' | 'handwrite';
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const CANVAS_HEIGHT = 520;
+type TabType = 'schedule' | 'handwrite';
 
 export default function DailyViewScreen({ navigation, route }: Props) {
   const { date } = route.params;
@@ -37,10 +42,14 @@ export default function DailyViewScreen({ navigation, route }: Props) {
   const hours = getHoursOfDay();
 
   const [drawings, setDrawings] = useState<DrawingPath[]>([]);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>('combined');
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [customEvents, setCustomEvents] = useState<CalendarEvent[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('schedule');
   const [loading, setLoading] = useState(true);
   const [canvasKey, setCanvasKey] = useState(0);
+  
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [quickAddText, setQuickAddText] = useState('');
 
   const drawingsRef = useRef<DrawingPath[]>([]);
   const isInitialLoad = useRef(true);
@@ -71,9 +80,16 @@ export default function DailyViewScreen({ navigation, route }: Props) {
 
     try {
       const cal = await getEventsForDate(date);
-      setEvents(cal);
+      setCalendarEvents(cal);
     } catch {
-      setEvents([]);
+      setCalendarEvents([]);
+    }
+
+    try {
+      const custom = await getCustomEvents(date);
+      setCustomEvents(custom || []);
+    } catch {
+      setCustomEvents([]);
     }
 
     setLoading(false);
@@ -104,26 +120,123 @@ export default function DailyViewScreen({ navigation, route }: Props) {
     [date]
   );
 
+  // Parse text like "9:00 Meeting" or "14:30 Doctor"
+  const parseEventText = (text: string): { time: string | null; title: string; allDay: boolean } => {
+    const trimmed = text.trim();
+    
+    // Check for "all day" or "allday"
+    const allDayMatch = trimmed.match(/^(all\s*day|allday)\s*[-:]?\s*(.+)/i);
+    if (allDayMatch) {
+      return { time: null, title: allDayMatch[2].trim(), allDay: true };
+    }
+    
+    // Check for time pattern: "9:00", "09:00", "9.00", "9 ", etc.
+    const timeMatch = trimmed.match(/^(\d{1,2})[:.]?(\d{2})?\s*[-:]?\s*(.+)/);
+    if (timeMatch) {
+      const hour = timeMatch[1].padStart(2, '0');
+      const minute = (timeMatch[2] || '00').padStart(2, '0');
+      const title = timeMatch[3].trim();
+      
+      if (parseInt(hour) >= 0 && parseInt(hour) < 24) {
+        return { time: `${hour}:${minute}`, title, allDay: false };
+      }
+    }
+    
+    // No time found — treat whole text as title (all day)
+    return { time: null, title: trimmed, allDay: true };
+  };
+
+  const handleQuickAdd = async () => {
+    const text = quickAddText.trim();
+    if (!text) {
+      Alert.alert('Empty Text', 'Please enter an event description.');
+      return;
+    }
+
+    const parsed = parseEventText(text);
+    
+    if (!parsed.title) {
+      Alert.alert('Missing Title', 'Please add a title after the time.');
+      return;
+    }
+
+    // Build dates
+    const eventDate = new Date(date + 'T00:00:00');
+    let startDate: Date;
+    let endDate: Date;
+
+    if (parsed.allDay) {
+      startDate = new Date(eventDate);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(eventDate);
+      endDate.setHours(23, 59, 59, 999);
+    } else if (parsed.time) {
+      const [h, m] = parsed.time.split(':').map(Number);
+      startDate = new Date(eventDate);
+      startDate.setHours(h, m, 0, 0);
+      endDate = new Date(startDate);
+      endDate.setHours(h + 1, m, 0, 0); // 1 hour default
+    } else {
+      return;
+    }
+
+    const newEvent: CalendarEvent = {
+      id: `custom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      title: parsed.title,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      allDay: parsed.allDay,
+      calendarSource: 'local',
+      color: COLORS.highlight,
+    };
+
+    try {
+      await saveCustomEvent(date, newEvent);
+      const updated = await getCustomEvents(date);
+      setCustomEvents(updated || []);
+      setQuickAddText('');
+      setShowQuickAdd(false);
+    } catch (e) {
+      console.log('Save event error:', e);
+      Alert.alert('Error', 'Could not save event.');
+    }
+  };
+
+  const handleDeleteCustomEvent = (eventId: string, title: string) => {
+    Alert.alert(
+      'Delete Event',
+      `Delete "${title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteCustomEvent(date, eventId);
+              const updated = await getCustomEvents(date);
+              setCustomEvents(updated || []);
+            } catch (e) {
+              console.log('Delete error:', e);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Combine calendar events + custom events
+  const allEvents = [...calendarEvents, ...customEvents];
+
   const eventsAtHour = (hour: string): CalendarEvent[] => {
     const h = parseInt(hour.split(':')[0], 10);
-    return events.filter(
+    return allEvents.filter(
       (e) => !e.allDay && new Date(e.startDate).getHours() === h
     );
   };
 
-  const pointsToPath = (points: Point[]): string => {
-    if (!points || points.length === 0) return '';
-    if (points.length === 1) {
-      return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.5} ${points[0].y + 0.5}`;
-    }
-    let d = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length; i++) {
-      d += ` L ${points[i].x} ${points[i].y}`;
-    }
-    return d;
-  };
-
   const weekStart = startOfWeek(dayData.date, { weekStartsOn: 1 });
+  const isCustomEvent = (event: CalendarEvent) => event.id.startsWith('custom_');
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -184,14 +297,6 @@ export default function DailyViewScreen({ navigation, route }: Props) {
 
       <View style={styles.tabs}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'combined' && styles.activeTab]}
-          onPress={() => setActiveTab('combined')}
-        >
-          <Text style={[styles.tabText, activeTab === 'combined' && styles.activeTabText]}>
-            📋✏️ Combined
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           style={[styles.tab, activeTab === 'schedule' && styles.activeTab]}
           onPress={() => setActiveTab('schedule')}
         >
@@ -204,178 +309,166 @@ export default function DailyViewScreen({ navigation, route }: Props) {
           onPress={() => setActiveTab('handwrite')}
         >
           <Text style={[styles.tabText, activeTab === 'handwrite' && styles.activeTabText]}>
-            ✏️ Write
+            ✏️ Handwrite Notes
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* ───────────────────────────────────────── */}
-      {/* COMBINED TAB - Schedule + Writing Overlay */}
-      {/* ───────────────────────────────────────── */}
-      {activeTab === 'combined' && (
-        <View style={{ flex: 1 }}>
-          <View style={styles.combinedHintBar}>
-            <Text style={styles.combinedHintText}>
-              📋 Calendar + ✏️ Your handwriting overlay
-              {drawings.length > 0 ? `  •  ${drawings.length} strokes` : '  •  No writing yet'}
-            </Text>
-          </View>
+      {/* SCHEDULE TAB */}
+      {activeTab === 'schedule' && (
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={120}
+        >
+          {/* Quick Add Bar */}
+          {showQuickAdd ? (
+            <View style={styles.quickAddForm}>
+              <Text style={styles.quickAddLabel}>
+                ➕ Quick Add Event
+              </Text>
+              <Text style={styles.quickAddHint}>
+                Examples:{'\n'}
+                • "9:00 Meeting with John"{'\n'}
+                • "14:30 Doctor appointment"{'\n'}
+                • "All day - Vacation"
+              </Text>
+              <TextInput
+                style={styles.quickAddInput}
+                value={quickAddText}
+                onChangeText={setQuickAddText}
+                placeholder="Type time + event..."
+                placeholderTextColor={COLORS.textSecondary}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={handleQuickAdd}
+              />
+              <View style={styles.quickAddBtns}>
+                <TouchableOpacity 
+                  style={styles.btnAdd} 
+                  onPress={handleQuickAdd}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.btnAddText}>✓ Add to Schedule</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.btnCancel}
+                  onPress={() => {
+                    setQuickAddText('');
+                    setShowQuickAdd(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.btnCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.addEventBtn}
+              onPress={() => setShowQuickAdd(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.addEventBtnText}>➕ Add Event to Schedule</Text>
+            </TouchableOpacity>
+          )}
 
-          <ScrollView contentContainerStyle={styles.combinedScroll}>
-            <View style={styles.combinedWrapper}>
-              {/* LAYER 1: Schedule background */}
-              <View style={styles.scheduleBackground}>
-                {events.filter((e) => e.allDay).map((e) => (
-                  <View
-                    key={e.id}
-                    style={[styles.allDayEvent, { borderLeftColor: e.color ?? COLORS.accent }]}
-                  >
-                    <Text style={styles.allDayBadge}>ALL DAY</Text>
-                    <Text style={styles.allDayTitle}>{e.title}</Text>
-                  </View>
-                ))}
+          <ScrollView contentContainerStyle={styles.scroll}>
+            <View>
+              {/* All day events */}
+              {allEvents.filter((e) => e.allDay).map((e) => (
+                <View
+                  key={e.id}
+                  style={[
+                    styles.allDayEvent, 
+                    { borderLeftColor: e.color ?? COLORS.accent },
+                    isCustomEvent(e) && styles.customEventCard,
+                  ]}
+                >
+                  <Text style={styles.allDayBadge}>ALL DAY</Text>
+                  <Text style={styles.allDayTitle}>{e.title}</Text>
+                  {isCustomEvent(e) && (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteCustomEvent(e.id, e.title)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={styles.deleteIcon}>🗑️</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
 
-                {hours.map((hour) => {
-                  const evts = eventsAtHour(hour);
-                  return (
-                    <View key={hour} style={styles.hourRow}>
-                      <View style={styles.hourLabel}>
-                        <Text style={styles.hourText}>{hour}</Text>
-                      </View>
-                      <View style={styles.hourContent}>
-                        {evts.map((e) => (
-                          <View
-                            key={e.id}
-                            style={[
-                              styles.scheduleEvent,
-                              { borderLeftColor: e.color ?? COLORS.accent },
-                            ]}
-                          >
+              {/* Hourly schedule */}
+              {hours.map((hour) => {
+                const evts = eventsAtHour(hour);
+                return (
+                  <View key={hour} style={styles.hourRow}>
+                    <View style={styles.hourLabel}>
+                      <Text style={styles.hourText}>{hour}</Text>
+                    </View>
+                    <View style={styles.hourContent}>
+                      {evts.map((e) => (
+                        <View
+                          key={e.id}
+                          style={[
+                            styles.scheduleEvent,
+                            { borderLeftColor: e.color ?? COLORS.accent },
+                            isCustomEvent(e) && styles.customEventCard,
+                          ]}
+                        >
+                          <View style={{ flex: 1 }}>
                             <Text style={styles.evtTime}>
                               {format(new Date(e.startDate), 'HH:mm')} -{' '}
                               {format(new Date(e.endDate), 'HH:mm')}
                             </Text>
                             <Text style={styles.evtTitle}>{e.title}</Text>
+                            {isCustomEvent(e) ? (
+                              <Text style={styles.customBadge}>📝 Custom Event</Text>
+                            ) : (
+                              <Text style={styles.evtSource}>{e.calendarSource}</Text>
+                            )}
                           </View>
-                        ))}
-                      </View>
+                          {isCustomEvent(e) && (
+                            <TouchableOpacity
+                              onPress={() => handleDeleteCustomEvent(e.id, e.title)}
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                              <Text style={styles.deleteIcon}>🗑️</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      ))}
                     </View>
-                  );
-                })}
-              </View>
+                  </View>
+                );
+              })}
 
-              {/* LAYER 2: Handwriting overlay on top */}
-              {drawings.length > 0 && (
-                <Svg
-                  width={SCREEN_WIDTH}
-                  height={CANVAS_HEIGHT}
-                  style={styles.svgOverlay}
-                  pointerEvents="none"
-                >
-                  {drawings.map((path) => (
-                    <Path
-                      key={path.id}
-                      d={pointsToPath(path.points)}
-                      stroke={path.color}
-                      strokeWidth={path.strokeWidth}
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      opacity={0.9}
-                    />
-                  ))}
-                </Svg>
-              )}
-
-              {events.length === 0 && drawings.length === 0 && !loading && (
+              {allEvents.length === 0 && !loading && (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyIcon}>📅</Text>
-                  <Text style={styles.emptyText}>Nothing here yet</Text>
-                  <TouchableOpacity
-                    style={styles.openCalBtn}
-                    onPress={() => setActiveTab('handwrite')}
-                  >
-                    <Text style={styles.openCalBtnText}>✏️ Start Writing</Text>
-                  </TouchableOpacity>
+                  <Text style={styles.emptyText}>No events today</Text>
+                  <Text style={styles.emptyHint}>
+                    Tap "➕ Add Event" above to add one
+                  </Text>
                 </View>
               )}
             </View>
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
       )}
 
-      {/* ───────────────────────────────────────── */}
-      {/* SCHEDULE TAB - Calendar events only      */}
-      {/* ───────────────────────────────────────── */}
-      {activeTab === 'schedule' && (
-        <ScrollView contentContainerStyle={styles.scroll}>
-          <View>
-            {events.filter((e) => e.allDay).map((e) => (
-              <View
-                key={e.id}
-                style={[styles.allDayEvent, { borderLeftColor: e.color ?? COLORS.accent }]}
-              >
-                <Text style={styles.allDayBadge}>ALL DAY</Text>
-                <Text style={styles.allDayTitle}>{e.title}</Text>
-              </View>
-            ))}
-
-            {hours.map((hour) => {
-              const evts = eventsAtHour(hour);
-              return (
-                <View key={hour} style={styles.hourRow}>
-                  <View style={styles.hourLabel}>
-                    <Text style={styles.hourText}>{hour}</Text>
-                  </View>
-                  <View style={styles.hourContent}>
-                    {evts.map((e) => (
-                      <View
-                        key={e.id}
-                        style={[
-                          styles.scheduleEvent,
-                          { borderLeftColor: e.color ?? COLORS.accent },
-                        ]}
-                      >
-                        <Text style={styles.evtTime}>
-                          {format(new Date(e.startDate), 'HH:mm')} -{' '}
-                          {format(new Date(e.endDate), 'HH:mm')}
-                        </Text>
-                        <Text style={styles.evtTitle}>{e.title}</Text>
-                        <Text style={styles.evtSource}>{e.calendarSource}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              );
-            })}
-
-            {events.length === 0 && !loading && (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>📅</Text>
-                <Text style={styles.emptyText}>No calendar events today</Text>
-                <TouchableOpacity style={styles.openCalBtn} onPress={openExternalCalendar}>
-                  <Text style={styles.openCalBtnText}>Open Calendar App</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </ScrollView>
-      )}
-
-      {/* ───────────────────────────────────────── */}
-      {/* HANDWRITE TAB - Drawing canvas           */}
-      {/* ───────────────────────────────────────── */}
+      {/* HANDWRITE TAB */}
       {activeTab === 'handwrite' && (
         <View style={styles.handwriteContainer}>
           <Text style={styles.canvasLabel}>
-            ✏️ Write here — appears on "Combined" tab automatically
+            ✏️ Personal notes for this day (separate from schedule)
           </Text>
           {!loading && (
             <HandwritingCanvas
               key={`canvas-${date}-${canvasKey}`}
               initialDrawings={drawings}
               onDrawingsChange={handleDrawChange}
-              height={CANVAS_HEIGHT}
+              height={520}
               showLines
               lineSpacing={32}
             />
@@ -432,44 +525,84 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   activeTab: { borderBottomColor: COLORS.highlight },
-  tabText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
+  tabText: { color: COLORS.textSecondary, fontSize: 14, fontWeight: '600' },
   activeTabText: { color: COLORS.text },
 
-  scroll: { padding: 12, paddingBottom: 40 },
-
-  combinedHintBar: {
-    backgroundColor: COLORS.todayBg,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.highlight,
+  addEventBtn: {
+    backgroundColor: COLORS.highlight,
+    margin: 12,
+    padding: 14,
+    borderRadius: 12,
+    alignItems: 'center',
   },
-  combinedHintText: {
-    color: COLORS.text,
+  addEventBtnText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  quickAddForm: {
+    backgroundColor: COLORS.cardBg,
+    margin: 12,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: COLORS.highlight,
+  },
+  quickAddLabel: {
+    color: COLORS.highlight,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  quickAddHint: {
+    color: COLORS.textSecondary,
     fontSize: 12,
-    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  quickAddInput: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 14,
+    color: COLORS.text,
+    fontSize: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
+  quickAddBtns: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  btnAdd: {
+    backgroundColor: COLORS.success,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flex: 1,
+    alignItems: 'center',
+  },
+  btnAddText: {
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  btnCancel: {
+    backgroundColor: COLORS.secondary,
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
+  btnCancelText: {
+    color: COLORS.textSecondary,
     fontWeight: '600',
   },
-  combinedScroll: {
-    padding: 12,
-    paddingBottom: 40,
-  },
-  combinedWrapper: {
-    position: 'relative',
-    minHeight: CANVAS_HEIGHT,
-    width: '100%',
-  },
-  scheduleBackground: {
-    width: '100%',
-  },
-  svgOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    width: '100%',
-    height: CANVAS_HEIGHT,
-  },
+
+  scroll: { padding: 12, paddingBottom: 40 },
 
   handwriteContainer: {
     flex: 1,
@@ -486,6 +619,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  customEventCard: {
+    borderWidth: 1,
+    borderColor: COLORS.highlight,
+  },
   allDayBadge: {
     color: COLORS.highlight,
     fontSize: 10,
@@ -496,7 +633,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
   },
-  allDayTitle: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
+  allDayTitle: { color: COLORS.text, fontSize: 14, fontWeight: '600', flex: 1 },
 
   hourRow: {
     flexDirection: 'row',
@@ -515,29 +652,27 @@ const styles = StyleSheet.create({
   },
   scheduleEvent: {
     backgroundColor: COLORS.cardBg,
-    padding: 8,
+    padding: 10,
     borderRadius: 6,
     marginBottom: 4,
     borderLeftWidth: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   evtTime: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '600' },
   evtTitle: { color: COLORS.text, fontSize: 14, fontWeight: '600', marginTop: 2 },
   evtSource: { color: COLORS.textSecondary, fontSize: 10, textTransform: 'uppercase', marginTop: 2 },
+  customBadge: { color: COLORS.highlight, fontSize: 10, fontWeight: '700', marginTop: 2 },
+  deleteIcon: { fontSize: 16, padding: 4 },
 
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyIcon: { fontSize: 48, marginBottom: 14 },
-  emptyText: { color: COLORS.textSecondary, fontSize: 16, marginBottom: 20 },
-  openCalBtn: {
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  openCalBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
+  emptyText: { color: COLORS.text, fontSize: 16, fontWeight: '600' },
+  emptyHint: { color: COLORS.textSecondary, fontSize: 13, marginTop: 8 },
 
   canvasLabel: {
     color: COLORS.text,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 12,
