@@ -6,12 +6,10 @@ import {
   TouchableOpacity,
   Text,
   ScrollView,
-  Dimensions,
 } from 'react-native';
 import Svg, { Path, Line } from 'react-native-svg';
 import { DrawingPath, Point } from '../types';
 import { COLORS, PEN_COLORS, PEN_SIZES } from '../utils/constants';
-import { v4 as uuidv4 } from 'uuid';
 
 interface HandwritingCanvasProps {
   initialDrawings?: DrawingPath[];
@@ -22,10 +20,6 @@ interface HandwritingCanvasProps {
   editable?: boolean;
 }
 
-const MAX_POINTS_PER_PATH = 1000;
-const MAX_PATHS = 500;
-const MIN_DISTANCE = 1.5;
-
 export default function HandwritingCanvas({
   initialDrawings = [],
   onDrawingsChange,
@@ -34,47 +28,33 @@ export default function HandwritingCanvas({
   lineSpacing = 30,
   editable = true,
 }: HandwritingCanvasProps) {
-  const [paths, setPaths] = useState<DrawingPath[]>(initialDrawings);
-  const [currentPathPoints, setCurrentPathPoints] = useState<Point[]>([]);
+  const [allPaths, setAllPaths] = useState<DrawingPath[]>(initialDrawings);
+  const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
   const [selectedColor, setSelectedColor] = useState(PEN_COLORS[0]);
   const [selectedSize, setSelectedSize] = useState(PEN_SIZES[1]);
   const [isEraser, setIsEraser] = useState(false);
   const [showToolbar, setShowToolbar] = useState(false);
-  const [renderTrigger, setRenderTrigger] = useState(0);
 
-  const pathsRef = useRef<DrawingPath[]>(initialDrawings);
-  const currentPathRef = useRef<Point[]>([]);
-  const selectedColorRef = useRef(selectedColor);
-  const selectedSizeRef = useRef(selectedSize);
-  const isEraserRef = useRef(isEraser);
-  const lastPointRef = useRef<Point | null>(null);
-  const isDrawingRef = useRef(false);
+  const allPathsRef = useRef<DrawingPath[]>(initialDrawings);
+  const currentPointsRef = useRef<Point[]>([]);
+  const colorRef = useRef(selectedColor);
+  const sizeRef = useRef(selectedSize);
+  const eraserRef = useRef(isEraser);
 
   useEffect(() => {
-    if (initialDrawings && initialDrawings.length > 0) {
-      setPaths(initialDrawings);
-      pathsRef.current = initialDrawings;
-    }
-  }, []);
-
-  useEffect(() => {
-    selectedColorRef.current = selectedColor;
+    colorRef.current = selectedColor;
   }, [selectedColor]);
 
   useEffect(() => {
-    selectedSizeRef.current = selectedSize;
+    sizeRef.current = selectedSize;
   }, [selectedSize]);
 
   useEffect(() => {
-    isEraserRef.current = isEraser;
+    eraserRef.current = isEraser;
   }, [isEraser]);
 
-  const shouldAddPoint = (newPoint: Point): boolean => {
-    if (!lastPointRef.current) return true;
-    const dx = newPoint.x - lastPointRef.current.x;
-    const dy = newPoint.y - lastPointRef.current.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    return distance >= MIN_DISTANCE;
+  const generateId = () => {
+    return `path_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   };
 
   const panResponder = useRef(
@@ -84,190 +64,127 @@ export default function HandwritingCanvas({
       onStartShouldSetPanResponderCapture: () => editable,
       onMoveShouldSetPanResponderCapture: () => editable,
       onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
 
       onPanResponderGrant: (evt) => {
-        try {
-          const { locationX, locationY } = evt.nativeEvent;
-          const point = { x: locationX, y: locationY };
+        const x = evt.nativeEvent.locationX;
+        const y = evt.nativeEvent.locationY;
 
-          if (isEraserRef.current) {
-            eraseAtPoint(locationX, locationY);
-          } else {
-            isDrawingRef.current = true;
-            currentPathRef.current = [point];
-            lastPointRef.current = point;
-            setCurrentPathPoints([point]);
+        if (eraserRef.current) {
+          const filtered = allPathsRef.current.filter((p) => {
+            return !p.points.some(
+              (pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25
+            );
+          });
+          if (filtered.length !== allPathsRef.current.length) {
+            allPathsRef.current = filtered;
+            setAllPaths(filtered);
+            onDrawingsChange?.(filtered);
           }
-        } catch (e) {
-          console.log('Grant error:', e);
+        } else {
+          currentPointsRef.current = [{ x, y }];
+          setCurrentPoints([{ x, y }]);
         }
       },
 
       onPanResponderMove: (evt) => {
-        try {
-          const { locationX, locationY } = evt.nativeEvent;
-          const point = { x: locationX, y: locationY };
+        const x = evt.nativeEvent.locationX;
+        const y = evt.nativeEvent.locationY;
 
-          if (isEraserRef.current) {
-            eraseAtPoint(locationX, locationY);
-            return;
+        if (eraserRef.current) {
+          const filtered = allPathsRef.current.filter((p) => {
+            return !p.points.some(
+              (pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25
+            );
+          });
+          if (filtered.length !== allPathsRef.current.length) {
+            allPathsRef.current = filtered;
+            setAllPaths(filtered);
+            onDrawingsChange?.(filtered);
           }
-
-          if (!isDrawingRef.current) return;
-
-          if (currentPathRef.current.length >= MAX_POINTS_PER_PATH) {
-            return;
-          }
-
-          if (shouldAddPoint(point)) {
-            currentPathRef.current = [...currentPathRef.current, point];
-            lastPointRef.current = point;
-            setCurrentPathPoints(currentPathRef.current);
-          }
-        } catch (e) {
-          console.log('Move error:', e);
+          return;
         }
+
+        const lastPoint =
+          currentPointsRef.current[currentPointsRef.current.length - 1];
+        if (lastPoint) {
+          const dx = x - lastPoint.x;
+          const dy = y - lastPoint.y;
+          if (dx * dx + dy * dy < 2) return;
+        }
+
+        currentPointsRef.current = [...currentPointsRef.current, { x, y }];
+        setCurrentPoints([...currentPointsRef.current]);
       },
 
       onPanResponderRelease: () => {
-        try {
-          if (isEraserRef.current) {
-            isDrawingRef.current = false;
-            return;
-          }
+        if (eraserRef.current) return;
 
-          if (currentPathRef.current.length > 0) {
-            const newPath: DrawingPath = {
-              id: uuidv4(),
-              points: currentPathRef.current.slice(),
-              color: selectedColorRef.current,
-              strokeWidth: selectedSizeRef.current,
-            };
+        if (currentPointsRef.current.length > 0) {
+          const newPath: DrawingPath = {
+            id: generateId(),
+            points: [...currentPointsRef.current],
+            color: colorRef.current,
+            strokeWidth: sizeRef.current,
+          };
 
-            const newPaths = [...pathsRef.current, newPath];
-            pathsRef.current = newPaths;
-
-            setPaths(newPaths);
-            setCurrentPathPoints([]);
-            setRenderTrigger((prev) => prev + 1);
-
-            if (onDrawingsChange) {
-              setTimeout(() => {
-                onDrawingsChange(newPaths);
-              }, 0);
-            }
-          } else {
-            setCurrentPathPoints([]);
-          }
-
-          currentPathRef.current = [];
-          lastPointRef.current = null;
-          isDrawingRef.current = false;
-        } catch (e) {
-          console.log('Release error:', e);
-          currentPathRef.current = [];
-          lastPointRef.current = null;
-          isDrawingRef.current = false;
-          setCurrentPathPoints([]);
+          const updated = [...allPathsRef.current, newPath];
+          allPathsRef.current = updated;
+          setAllPaths(updated);
+          onDrawingsChange?.(updated);
         }
+
+        currentPointsRef.current = [];
+        setCurrentPoints([]);
       },
 
       onPanResponderTerminate: () => {
-        try {
-          if (currentPathRef.current.length > 0 && !isEraserRef.current) {
-            const newPath: DrawingPath = {
-              id: uuidv4(),
-              points: currentPathRef.current.slice(),
-              color: selectedColorRef.current,
-              strokeWidth: selectedSizeRef.current,
-            };
-            const newPaths = [...pathsRef.current, newPath];
-            pathsRef.current = newPaths;
-            setPaths(newPaths);
-            if (onDrawingsChange) {
-              setTimeout(() => onDrawingsChange(newPaths), 0);
-            }
-          }
-          currentPathRef.current = [];
-          lastPointRef.current = null;
-          isDrawingRef.current = false;
-          setCurrentPathPoints([]);
-        } catch (e) {
-          console.log('Terminate error:', e);
+        if (currentPointsRef.current.length > 0 && !eraserRef.current) {
+          const newPath: DrawingPath = {
+            id: generateId(),
+            points: [...currentPointsRef.current],
+            color: colorRef.current,
+            strokeWidth: sizeRef.current,
+          };
+          const updated = [...allPathsRef.current, newPath];
+          allPathsRef.current = updated;
+          setAllPaths(updated);
+          onDrawingsChange?.(updated);
         }
+        currentPointsRef.current = [];
+        setCurrentPoints([]);
       },
     })
   ).current;
 
-  const eraseAtPoint = useCallback(
-    (x: number, y: number) => {
-      try {
-        const eraserRadius = 25;
-        const filtered = pathsRef.current.filter((path) => {
-          return !path.points.some(
-            (p) =>
-              Math.abs(p.x - x) < eraserRadius &&
-              Math.abs(p.y - y) < eraserRadius
-          );
-        });
-        if (filtered.length !== pathsRef.current.length) {
-          pathsRef.current = filtered;
-          setPaths(filtered);
-          if (onDrawingsChange) {
-            onDrawingsChange(filtered);
-          }
-        }
-      } catch (e) {
-        console.log('Erase error:', e);
-      }
-    },
-    [onDrawingsChange]
-  );
-
-  const pointsToSvgPath = (points: Point[]): string => {
+  const pointsToPath = (points: Point[]): string => {
     if (!points || points.length === 0) return '';
     if (points.length === 1) {
-      const p = points[0];
-      return `M ${p.x} ${p.y} L ${p.x + 0.5} ${p.y + 0.5}`;
-    }
-    if (points.length === 2) {
-      return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+      return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.5} ${
+        points[0].y + 0.5
+      }`;
     }
 
-    let path = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length - 1; i++) {
-      const curr = points[i];
-      const next = points[i + 1];
-      const midX = (curr.x + next.x) / 2;
-      const midY = (curr.y + next.y) / 2;
-      path += ` Q ${curr.x} ${curr.y} ${midX} ${midY}`;
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length; i++) {
+      d += ` L ${points[i].x} ${points[i].y}`;
     }
-    const last = points[points.length - 1];
-    path += ` L ${last.x} ${last.y}`;
-    return path;
+    return d;
   };
 
-  const clearCanvas = () => {
-    pathsRef.current = [];
-    setPaths([]);
-    setCurrentPathPoints([]);
-    if (onDrawingsChange) {
-      onDrawingsChange([]);
-    }
+  const clearAll = () => {
+    allPathsRef.current = [];
+    setAllPaths([]);
+    onDrawingsChange?.([]);
   };
 
   const undoLast = () => {
-    const updated = pathsRef.current.slice(0, -1);
-    pathsRef.current = updated;
-    setPaths(updated);
-    if (onDrawingsChange) {
-      onDrawingsChange(updated);
-    }
+    const updated = allPathsRef.current.slice(0, -1);
+    allPathsRef.current = updated;
+    setAllPaths(updated);
+    onDrawingsChange?.(updated);
   };
 
-  const numberOfLines = Math.floor(height / lineSpacing);
-  const screenWidth = Dimensions.get('window').width;
+  const numLines = Math.floor(height / lineSpacing);
 
   return (
     <View style={styles.wrapper}>
@@ -278,7 +195,7 @@ export default function HandwritingCanvas({
         >
           <Text style={styles.toolbarToggleText}>
             {showToolbar ? '✕ Hide Tools' : '✏️ Drawing Tools'}
-            {paths.length > 0 ? `  (${paths.length} strokes)` : ''}
+            {allPaths.length > 0 ? `  (${allPaths.length} strokes)` : ''}
           </Text>
         </TouchableOpacity>
       )}
@@ -293,11 +210,11 @@ export default function HandwritingCanvas({
                   <TouchableOpacity
                     key={color}
                     style={[
-                      styles.colorButton,
+                      styles.colorBtn,
                       { backgroundColor: color },
                       selectedColor === color &&
                         !isEraser &&
-                        styles.selectedColor,
+                        styles.colorSelected,
                     ]}
                     onPress={() => {
                       setSelectedColor(color);
@@ -316,8 +233,8 @@ export default function HandwritingCanvas({
                 <TouchableOpacity
                   key={size}
                   style={[
-                    styles.sizeButton,
-                    selectedSize === size && styles.selectedSize,
+                    styles.sizeBtn,
+                    selectedSize === size && styles.sizeSelected,
                   ]}
                   onPress={() => setSelectedSize(size)}
                 >
@@ -333,16 +250,16 @@ export default function HandwritingCanvas({
 
             <View style={styles.actionRow}>
               <TouchableOpacity
-                style={[styles.toolBtn, isEraser && styles.activeToolBtn]}
+                style={[styles.actionBtn, isEraser && styles.actionBtnActive]}
                 onPress={() => setIsEraser(!isEraser)}
               >
-                <Text style={styles.toolBtnText}>🧹</Text>
+                <Text style={styles.actionText}>🧹</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.toolBtn} onPress={undoLast}>
-                <Text style={styles.toolBtnText}>↩️</Text>
+              <TouchableOpacity style={styles.actionBtn} onPress={undoLast}>
+                <Text style={styles.actionText}>↩️</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.toolBtn} onPress={clearCanvas}>
-                <Text style={styles.toolBtnText}>🗑️</Text>
+              <TouchableOpacity style={styles.actionBtn} onPress={clearAll}>
+                <Text style={styles.actionText}>🗑️</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -355,28 +272,28 @@ export default function HandwritingCanvas({
         collapsable={false}
       >
         <Svg
-          style={StyleSheet.absoluteFill}
           width="100%"
           height={height}
+          style={StyleSheet.absoluteFill}
           pointerEvents="none"
         >
           {showLines &&
-            Array.from({ length: numberOfLines }, (_, i) => (
+            Array.from({ length: numLines }, (_, i) => (
               <Line
-                key={`line-${i}`}
+                key={`l-${i}`}
                 x1="0"
                 y1={(i + 1) * lineSpacing}
-                x2={screenWidth + 100}
+                x2="3000"
                 y2={(i + 1) * lineSpacing}
                 stroke={COLORS.canvasLine}
                 strokeWidth="0.7"
               />
             ))}
 
-          {paths.map((path) => (
+          {allPaths.map((path) => (
             <Path
               key={path.id}
-              d={pointsToSvgPath(path.points)}
+              d={pointsToPath(path.points)}
               stroke={path.color}
               strokeWidth={path.strokeWidth}
               fill="none"
@@ -385,10 +302,9 @@ export default function HandwritingCanvas({
             />
           ))}
 
-          {currentPathPoints.length > 0 && (
+          {currentPoints.length > 0 && (
             <Path
-              key="current-drawing"
-              d={pointsToSvgPath(currentPathPoints)}
+              d={pointsToPath(currentPoints)}
               stroke={selectedColor}
               strokeWidth={selectedSize}
               fill="none"
@@ -445,14 +361,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  colorButton: {
+  colorBtn: {
     width: 30,
     height: 30,
     borderRadius: 15,
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  selectedColor: {
+  colorSelected: {
     borderColor: '#ffffff',
     transform: [{ scale: 1.2 }],
   },
@@ -460,7 +376,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
-  sizeButton: {
+  sizeBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -470,7 +386,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  selectedSize: {
+  sizeSelected: {
     borderColor: COLORS.highlight,
   },
   sizeDot: {
@@ -482,7 +398,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginLeft: 'auto',
   },
-  toolBtn: {
+  actionBtn: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     backgroundColor: COLORS.cardBg,
@@ -490,11 +406,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
-  activeToolBtn: {
+  actionBtnActive: {
     borderColor: COLORS.highlight,
     backgroundColor: COLORS.todayBg,
   },
-  toolBtnText: {
+  actionText: {
     fontSize: 16,
   },
   canvas: {
