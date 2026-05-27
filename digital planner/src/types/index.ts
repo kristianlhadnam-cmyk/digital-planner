@@ -10,6 +10,11 @@ export interface Point {
   y: number;
 }
 
+export interface PdfAnnotation {
+  pageNumber: number;
+  drawings: DrawingPath[];
+}
+
 export interface DaySchedule {
   date: string;
   drawings: DrawingPath[];
@@ -53,6 +58,7 @@ export interface NoteEntry {
   textContent: string;
   pdfUri?: string;
   pdfName?: string;
+  pdfAnnotations?: PdfAnnotation[];
 }
 
 export type RootStackParamList = {
@@ -64,4 +70,5 @@ export type RootStackParamList = {
   TodoList: undefined;
   NotesJournal: undefined;
   NoteEditor: { noteId?: string; type: 'note' | 'journal' };
+  PdfViewer: { noteId: string; pdfUri: string; pdfName: string };
 };
