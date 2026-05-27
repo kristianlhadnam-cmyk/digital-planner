@@ -1,5 +1,3 @@
-// FILE: digital-planner/src/types/index.ts
-
 export interface DrawingPath {
   id: string;
   points: Point[];
