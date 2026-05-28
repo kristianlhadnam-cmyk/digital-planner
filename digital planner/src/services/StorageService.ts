@@ -130,24 +130,29 @@ export const deleteCustomEvent = async (
     );
   } catch (error) {
     console.error('Error deleting custom event:', error);
-    
-// NEW: Get custom events for multiple dates at once
-export const getCustomEventsForDateRange = async (
-  dateStrings: string[]
-): Promise<{ [key: string]: CalendarEvent[] }> => {
+    export const getCustomEventsForRange = async (
+  startDateString: string,
+  endDateString: string
+): Promise<{ [date: string]: CalendarEvent[] }> => {
   try {
-    const result: { [key: string]: CalendarEvent[] } = {};
+    const result: { [date: string]: CalendarEvent[] } = {};
+    const startDate = new Date(startDateString);
+    const endDate = new Date(endDateString);
     
-    for (const dateString of dateStrings) {
-      const events = await getCustomEvents(dateString);
+    // Loop through each day in the range
+    const currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const events = await getCustomEvents(dateStr);
       if (events.length > 0) {
-        result[dateString] = events;
+        result[dateStr] = events;
       }
+      currentDate.setDate(currentDate.getDate() + 1);
     }
     
     return result;
   } catch (error) {
-    console.error('Error getting custom events for range:', error);
+    console.error('Error getting custom events range:', error);
     return {};
   }
 };
