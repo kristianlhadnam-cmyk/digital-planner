@@ -10,7 +10,7 @@ import {
 import { STORAGE_KEYS } from '../utils/constants';
 
 // ─────────────────────────────────────────
-// SIMPLE ID GENERATOR (replaces uuid library)
+// SIMPLE ID GENERATOR
 // ─────────────────────────────────────────
 
 const generateId = (): string => {
@@ -130,7 +130,10 @@ export const deleteCustomEvent = async (
     );
   } catch (error) {
     console.error('Error deleting custom event:', error);
-    export const getCustomEventsForRange = async (
+  }
+};
+
+export const getCustomEventsForRange = async (
   startDateString: string,
   endDateString: string
 ): Promise<{ [date: string]: CalendarEvent[] }> => {
@@ -138,8 +141,7 @@ export const deleteCustomEvent = async (
     const result: { [date: string]: CalendarEvent[] } = {};
     const startDate = new Date(startDateString);
     const endDate = new Date(endDateString);
-    
-    // Loop through each day in the range
+
     const currentDate = new Date(startDate);
     while (currentDate <= endDate) {
       const dateStr = currentDate.toISOString().split('T')[0];
@@ -149,7 +151,7 @@ export const deleteCustomEvent = async (
       }
       currentDate.setDate(currentDate.getDate() + 1);
     }
-    
+
     return result;
   } catch (error) {
     console.error('Error getting custom events range:', error);
