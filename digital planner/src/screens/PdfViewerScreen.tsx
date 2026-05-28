@@ -8,16 +8,13 @@ import {
   Alert,
   ActivityIndicator,
   PanResponder,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { WebView } from 'react-native-webview';
 import Svg, { Path } from 'react-native-svg';
-import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
-import * as IntentLauncher from 'expo-intent-launcher';
 import { RootStackParamList, DrawingPath, PdfAnnotation, Point } from '../types';
 import { COLORS, PEN_COLORS, PEN_SIZES } from '../utils/constants';
 import CalendarHeader from '../components/CalendarHeader';
@@ -28,7 +25,7 @@ type Props = {
   route: RouteProp<RootStackParamList, 'PdfViewer'>;
 };
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const generateId = (): string => {
   return `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
@@ -45,6 +42,9 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
   const [isEraser, setIsEraser] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const annotationsRef = useRef<PdfAnnotation[]>([]);
   const currentPathRef = useRef<Point[]>([]);
@@ -53,6 +53,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
   const eraserRef = useRef(isEraser);
   const pageRef = useRef(currentPage);
   const drawingModeRef = useRef(isDrawingMode);
+  const webViewRef = useRef<WebView>(null);
 
   useEffect(() => { colorRef.current = selectedColor; }, [selectedColor]);
   useEffect(() => { sizeRef.current = selectedSize; }, [selectedSize]);
@@ -62,7 +63,33 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     loadAnnotations();
-  }, [noteId]);
+    loadPdfAsBase64();
+  }, [noteId, pdfUri]);
+
+  const loadPdfAsBase64 = async () => {
+    try {
+      setLoading(true);
+      console.log('Loading PDF from:', pdfUri);
+      
+      const info = await FileSystem.getInfoAsync(pdfUri);
+      if (!info.exists) {
+        setError('PDF file not found');
+        setLoading(false);
+        return;
+      }
+
+      const base64 = await FileSystem.readAsStringAsync(pdfUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      console.log('PDF loaded, base64 length:', base64.length);
+      setPdfBase64(base64);
+    } catch (e: any) {
+      console.log('Load PDF error:', e);
+      setError('Could not load PDF: ' + String(e.message || e));
+      setLoading(false);
+    }
+  };
 
   const loadAnnotations = async () => {
     try {
@@ -211,7 +238,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
   const clearCurrentPage = () => {
     Alert.alert(
       'Clear Page',
-      `Clear all annotations on this page?`,
+      `Clear annotations on page ${currentPage}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -233,91 +260,202 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
     }
   };
 
-  const handleShare = async () => {
+  const goToPage = (page: number) => {
+    if (page < 1 || page > totalPages) return;
+    setCurrentPage(page);
+    webViewRef.current?.injectJavaScript(`renderPage(${page}); true;`);
+  };
+
+  // Handle messages from WebView
+  const handleWebViewMessage = (event: any) => {
     try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(pdfUri);
-      } else {
-        Alert.alert('Not Available', 'Sharing is not available on this device.');
+      const data = JSON.parse(event.nativeEvent.data);
+      console.log('WebView message:', data);
+
+      if (data.type === 'loaded') {
+        setTotalPages(data.totalPages);
+        setLoading(false);
+      } else if (data.type === 'pageChanged') {
+        setCurrentPage(data.page);
+      } else if (data.type === 'error') {
+        setError(data.message);
+        setLoading(false);
       }
     } catch (e) {
-      console.log('Share error:', e);
+      console.log('Parse message error:', e);
     }
   };
 
-  const handleOpenExternal = async () => {
-    try {
-      if (Platform.OS === 'android') {
-        // Get a content URI for the file
-        const contentUri = await FileSystem.getContentUriAsync(pdfUri);
-        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-          data: contentUri,
-          flags: 1,
-          type: 'application/pdf',
+  // HTML with PDF.js to render the PDF
+  const generateHtml = (base64: string): string => {
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%;
+      height: 100%;
+      background: #525252;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #pdf-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: auto;
+    }
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+    #loading {
+      color: white;
+      font-family: sans-serif;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="pdf-container">
+    <div id="loading">Loading PDF...</div>
+    <canvas id="pdf-canvas" style="display:none;"></canvas>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
+    let pdfDoc = null;
+    let currentRenderPage = 1;
+    let canvas = document.getElementById('pdf-canvas');
+    let ctx = canvas.getContext('2d');
+    let loadingDiv = document.getElementById('loading');
+
+    // Convert base64 to Uint8Array
+    function base64ToUint8Array(base64) {
+      const binaryString = atob(base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    function sendMessage(data) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      }
+    }
+
+    async function loadPdf() {
+      try {
+        const pdfData = base64ToUint8Array('${base64}');
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        pdfDoc = await loadingTask.promise;
+        
+        sendMessage({
+          type: 'loaded',
+          totalPages: pdfDoc.numPages
         });
-      } else {
-        await Sharing.shareAsync(pdfUri);
+        
+        loadingDiv.style.display = 'none';
+        canvas.style.display = 'block';
+        renderPage(1);
+      } catch (error) {
+        sendMessage({
+          type: 'error',
+          message: error.message || 'Failed to load PDF'
+        });
+        loadingDiv.textContent = 'Error: ' + error.message;
       }
-    } catch (e) {
-      console.log('Open error:', e);
-      Alert.alert('No PDF Reader', 'Please install a PDF reader app.');
     }
-  };
 
-  const changePage = (direction: 'prev' | 'next') => {
-    Alert.prompt(
-      'Change Page',
-      `Currently on page ${currentPage}. Enter new page number:`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Go',
-          onPress: (text) => {
-            if (text) {
-              const num = parseInt(text);
-              if (!isNaN(num) && num >= 1) {
-                setCurrentPage(num);
-              }
-            }
-          },
-        },
-      ],
-      'plain-text',
-      String(direction === 'prev' ? Math.max(1, currentPage - 1) : currentPage + 1)
-    );
-  };
+    async function renderPage(pageNum) {
+      if (!pdfDoc) return;
+      
+      try {
+        currentRenderPage = pageNum;
+        const page = await pdfDoc.getPage(pageNum);
+        
+        // Calculate scale to fit screen width
+        const containerWidth = window.innerWidth;
+        const containerHeight = window.innerHeight;
+        const viewport = page.getViewport({ scale: 1 });
+        
+        const scaleX = containerWidth / viewport.width;
+        const scaleY = containerHeight / viewport.height;
+        const scale = Math.min(scaleX, scaleY) * 0.95;
+        
+        const scaledViewport = page.getViewport({ scale: scale });
+        
+        canvas.width = scaledViewport.width;
+        canvas.height = scaledViewport.height;
+        
+        const renderContext = {
+          canvasContext: ctx,
+          viewport: scaledViewport
+        };
+        
+        await page.render(renderContext).promise;
+        
+        sendMessage({
+          type: 'pageChanged',
+          page: pageNum
+        });
+      } catch (error) {
+        sendMessage({
+          type: 'error',
+          message: 'Render error: ' + error.message
+        });
+      }
+    }
 
-  // HTML to display PDF in WebView
-  const pdfHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-      <style>
-        body, html {
-          margin: 0;
-          padding: 0;
-          width: 100%;
-          height: 100%;
-          background: #525252;
-          overflow: hidden;
-        }
-        iframe, embed, object {
-          width: 100%;
-          height: 100%;
-          border: none;
-        }
-      </style>
-    </head>
-    <body>
-      <iframe src="${pdfUri}" type="application/pdf"></iframe>
-    </body>
-    </html>
-  `;
+    // Start loading
+    loadPdf();
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      if (pdfDoc) renderPage(currentRenderPage);
+    });
+  </script>
+</body>
+</html>
+    `;
+  };
 
   const currentPageDrawings = getCurrentPageDrawings();
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <CalendarHeader
+          onHomePress={() => navigation.navigate('Home')}
+          title="PDF Error"
+        />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorIcon}>⚠️</Text>
+          <Text style={styles.errorTitle}>Could Not Load PDF</Text>
+          <Text style={styles.errorMessage}>{error}</Text>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backBtnText}>← Back to Note</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -363,53 +501,41 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
             🧹 Erase
           </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity style={styles.iconBtn} onPress={handleOpenExternal}>
-          <Text style={styles.iconText}>📂</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
-          <Text style={styles.iconText}>📤</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Drawing Tools */}
       {isDrawingMode && !isEraser && (
         <View style={styles.drawingTools}>
-          <View style={styles.toolGroup}>
-            <Text style={styles.toolLabel}>Color:</Text>
-            {PEN_COLORS.slice(0, 5).map((color) => (
-              <TouchableOpacity
-                key={color}
-                style={[
-                  styles.colorBtn,
-                  { backgroundColor: color },
-                  selectedColor === color && styles.colorSelected,
-                ]}
-                onPress={() => setSelectedColor(color)}
-              />
-            ))}
-          </View>
+          <Text style={styles.toolLabel}>Color:</Text>
+          {PEN_COLORS.slice(0, 5).map((color) => (
+            <TouchableOpacity
+              key={color}
+              style={[
+                styles.colorBtn,
+                { backgroundColor: color },
+                selectedColor === color && styles.colorSelected,
+              ]}
+              onPress={() => setSelectedColor(color)}
+            />
+          ))}
 
-          <View style={styles.toolGroup}>
-            <Text style={styles.toolLabel}>Size:</Text>
-            {PEN_SIZES.map((size) => (
-              <TouchableOpacity
-                key={size}
-                style={[
-                  styles.sizeBtn,
-                  selectedSize === size && styles.sizeSelected,
-                ]}
-                onPress={() => setSelectedSize(size)}
-              >
-                <View style={[styles.sizeDot, { width: size * 2.5, height: size * 2.5 }]} />
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Text style={[styles.toolLabel, { marginLeft: 12 }]}>Size:</Text>
+          {PEN_SIZES.map((size) => (
+            <TouchableOpacity
+              key={size}
+              style={[
+                styles.sizeBtn,
+                selectedSize === size && styles.sizeSelected,
+              ]}
+              onPress={() => setSelectedSize(size)}
+            >
+              <View style={[styles.sizeDot, { width: size * 2, height: size * 2 }]} />
+            </TouchableOpacity>
+          ))}
         </View>
       )}
 
-      {/* PDF Container with Drawing Overlay */}
+      {/* PDF Container */}
       <View style={styles.pdfContainer}>
         {loading && (
           <View style={styles.loadingOverlay}>
@@ -418,29 +544,31 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        <WebView
-          source={{ html: pdfHtml }}
-          style={styles.webview}
-          onLoadEnd={() => setLoading(false)}
-          onError={(e) => {
-            console.log('WebView error:', e);
-            setLoading(false);
-          }}
-          originWhitelist={['*']}
-          allowFileAccess={true}
-          allowFileAccessFromFileURLs={true}
-          allowUniversalAccessFromFileURLs={true}
-          mixedContentMode="always"
-          javaScriptEnabled={true}
-          domStorageEnabled={true}
-        />
+        {pdfBase64 && (
+          <WebView
+            ref={webViewRef}
+            source={{ html: generateHtml(pdfBase64) }}
+            style={styles.webview}
+            onMessage={handleWebViewMessage}
+            onError={(e) => {
+              console.log('WebView error:', e.nativeEvent);
+              setError('WebView error: ' + e.nativeEvent.description);
+            }}
+            originWhitelist={['*']}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            scalesPageToFit={false}
+            scrollEnabled={false}
+            bounces={false}
+            mixedContentMode="always"
+          />
+        )}
 
         {/* Drawing Overlay */}
         <View
           style={[
             StyleSheet.absoluteFill,
             { backgroundColor: 'transparent' },
-            !isDrawingMode && { pointerEvents: 'none' },
           ]}
           {...(isDrawingMode ? panResponder.panHandlers : {})}
           pointerEvents={isDrawingMode ? 'auto' : 'none'}
@@ -477,20 +605,20 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {/* Bottom Bar - Page Info */}
+      {/* Page Navigation */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={styles.pageBtn}
-          onPress={() => setCurrentPage(Math.max(1, currentPage - 1))}
+          style={[styles.pageBtn, currentPage <= 1 && styles.pageBtnDisabled]}
+          onPress={() => goToPage(currentPage - 1)}
           disabled={currentPage <= 1}
         >
-          <Text style={[styles.pageBtnText, currentPage <= 1 && styles.pageBtnDisabled]}>
-            ← Prev
-          </Text>
+          <Text style={styles.pageBtnText}>← Prev</Text>
         </TouchableOpacity>
 
         <View style={styles.pageInfo}>
-          <Text style={styles.pageInfoText}>Annotation Page {currentPage}</Text>
+          <Text style={styles.pageInfoText}>
+            Page {currentPage} of {totalPages}
+          </Text>
           {currentPageDrawings.length > 0 && (
             <Text style={styles.annotationCount}>
               ✏️ {currentPageDrawings.length} strokes
@@ -499,8 +627,9 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
         </View>
 
         <TouchableOpacity
-          style={styles.pageBtn}
-          onPress={() => setCurrentPage(currentPage + 1)}
+          style={[styles.pageBtn, currentPage >= totalPages && styles.pageBtnDisabled]}
+          onPress={() => goToPage(currentPage + 1)}
+          disabled={currentPage >= totalPages}
         >
           <Text style={styles.pageBtnText}>Next →</Text>
         </TouchableOpacity>
@@ -513,17 +642,8 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
             <Text style={styles.actionBtnText}>↩️ Undo</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionBtn} onPress={clearCurrentPage}>
-            <Text style={styles.actionBtnText}>🗑️ Clear</Text>
+            <Text style={styles.actionBtnText}>🗑️ Clear Page</Text>
           </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Help banner for first-time users */}
-      {!isDrawingMode && currentPageDrawings.length === 0 && (
-        <View style={styles.helpBanner}>
-          <Text style={styles.helpText}>
-            💡 Tap "✏️ Draw" to annotate this PDF, or "📂" to open in another app
-          </Text>
         </View>
       )}
     </SafeAreaView>
@@ -532,6 +652,37 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
+
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorIcon: { fontSize: 64, marginBottom: 16 },
+  errorTitle: {
+    color: COLORS.error,
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  errorMessage: {
+    color: COLORS.text,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  backBtn: {
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  backBtnText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 
   topBar: {
     flexDirection: 'row',
@@ -558,23 +709,11 @@ const styles = StyleSheet.create({
   },
   modeBtnText: {
     color: COLORS.textSecondary,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '600',
   },
   modeBtnTextActive: {
     color: COLORS.white,
-  },
-  iconBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: COLORS.secondary,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  iconText: {
-    fontSize: 16,
   },
 
   drawingTools: {
@@ -582,25 +721,22 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.secondary,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    gap: 16,
+    gap: 6,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.cardBorder,
-    flexWrap: 'wrap',
-  },
-  toolGroup: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flexWrap: 'wrap',
   },
   toolLabel: {
     color: COLORS.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
+    marginRight: 4,
   },
   colorBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 2,
     borderColor: 'transparent',
   },
@@ -609,9 +745,9 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.15 }],
   },
   sizeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: COLORS.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -668,13 +804,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accent,
     borderRadius: 8,
   },
+  pageBtnDisabled: {
+    opacity: 0.3,
+  },
   pageBtnText: {
     color: COLORS.text,
     fontSize: 14,
     fontWeight: '600',
-  },
-  pageBtnDisabled: {
-    opacity: 0.3,
   },
   pageInfo: {
     alignItems: 'center',
@@ -713,18 +849,5 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 13,
     fontWeight: '600',
-  },
-
-  helpBanner: {
-    backgroundColor: COLORS.todayBg,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.highlight,
-  },
-  helpText: {
-    color: COLORS.text,
-    fontSize: 12,
-    textAlign: 'center',
   },
 });
