@@ -8,16 +8,25 @@ import {
   CalendarEvent,
 } from '../types';
 import { STORAGE_KEYS } from '../utils/constants';
-
-// ─────────────────────────────────────────
-// SIMPLE ID GENERATOR
-// ─────────────────────────────────────────
+import {
+  syncNotesToCloud,
+  syncTodosToCloud,
+  syncDayDrawingsToCloud,
+  syncCustomEventsToCloud,
+  getNotesFromCloud,
+  getTodosFromCloud,
+} from './CloudSyncService';
+import { auth } from './firebase';
 
 const generateId = (): string => {
   const timestamp = Date.now().toString(36);
   const random1 = Math.random().toString(36).substring(2, 11);
   const random2 = Math.random().toString(36).substring(2, 11);
   return `${timestamp}_${random1}_${random2}`;
+};
+
+const isLoggedIn = (): boolean => {
+  return auth.currentUser !== null;
 };
 
 // ─────────────────────────────────────────
@@ -47,6 +56,12 @@ export const saveDayDrawings = async (
       `${STORAGE_KEYS.DAY_DRAWINGS}${dateString}`,
       JSON.stringify(drawings)
     );
+    // Sync to cloud if logged in
+    if (isLoggedIn()) {
+      syncDayDrawingsToCloud(dateString, drawings).catch((e) =>
+        console.log('Cloud sync error:', e)
+      );
+    }
   } catch (error) {
     console.error('Error saving day drawings:', error);
   }
@@ -84,7 +99,7 @@ export const saveDaySchedule = async (
 };
 
 // ─────────────────────────────────────────
-// CUSTOM EVENTS (Quick-Add events)
+// CUSTOM EVENTS
 // ─────────────────────────────────────────
 
 const CUSTOM_EVENTS_KEY = 'planner_custom_events_';
@@ -112,6 +127,11 @@ export const saveCustomEvent = async (
       `${CUSTOM_EVENTS_KEY}${dateString}`,
       JSON.stringify(updated)
     );
+    if (isLoggedIn()) {
+      syncCustomEventsToCloud(dateString, updated).catch((e) =>
+        console.log('Cloud sync error:', e)
+      );
+    }
   } catch (error) {
     console.error('Error saving custom event:', error);
   }
@@ -128,6 +148,11 @@ export const deleteCustomEvent = async (
       `${CUSTOM_EVENTS_KEY}${dateString}`,
       JSON.stringify(filtered)
     );
+    if (isLoggedIn()) {
+      syncCustomEventsToCloud(dateString, filtered).catch((e) =>
+        console.log('Cloud sync error:', e)
+      );
+    }
   } catch (error) {
     console.error('Error deleting custom event:', error);
   }
@@ -179,6 +204,11 @@ export const saveTodoLists = async (lists: TodoList[]): Promise<void> => {
       STORAGE_KEYS.TODO_LISTS,
       JSON.stringify(lists)
     );
+    if (isLoggedIn()) {
+      syncTodosToCloud(lists).catch((e) =>
+        console.log('Cloud sync error:', e)
+      );
+    }
   } catch (error) {
     console.error('Error saving todo lists:', error);
   }
@@ -272,6 +302,11 @@ export const getNotes = async (): Promise<NoteEntry[]> => {
 export const saveNotes = async (notes: NoteEntry[]): Promise<void> => {
   try {
     await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(notes));
+    if (isLoggedIn()) {
+      syncNotesToCloud(notes).catch((e) =>
+        console.log('Cloud sync error:', e)
+      );
+    }
   } catch (error) {
     console.error('Error saving notes:', error);
   }
@@ -321,4 +356,31 @@ export const deleteNote = async (noteId: string): Promise<void> => {
   const notes = await getNotes();
   const filtered = notes.filter((n) => n.id !== noteId);
   await saveNotes(filtered);
+};
+
+// ─────────────────────────────────────────
+// SYNC FROM CLOUD (when user logs in)
+// ─────────────────────────────────────────
+
+export const syncFromCloud = async (): Promise<void> => {
+  if (!isLoggedIn()) return;
+
+  try {
+    const [cloudNotes, cloudTodos] = await Promise.all([
+      getNotesFromCloud(),
+      getTodosFromCloud(),
+    ]);
+
+    if (cloudNotes.length > 0) {
+      await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(cloudNotes));
+    }
+    if (cloudTodos.length > 0) {
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.TODO_LISTS,
+        JSON.stringify(cloudTodos)
+      );
+    }
+  } catch (e) {
+    console.log('Sync from cloud error:', e);
+  }
 };
