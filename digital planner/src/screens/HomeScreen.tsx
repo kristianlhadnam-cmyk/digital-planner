@@ -1,5 +1,3 @@
-// FILE: digital-planner/src/screens/HomeScreen.tsx
-
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -14,6 +12,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { format, getISOWeek, startOfWeek } from 'date-fns';
 import { RootStackParamList } from '../types';
 import { COLORS, MONTHS_SHORT } from '../utils/constants';
+import { getCurrentUser } from '../services/AuthService';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Home'>;
@@ -23,10 +22,16 @@ const { width } = Dimensions.get('window');
 
 export default function HomeScreen({ navigation }: Props) {
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [user, setUser] = useState(getCurrentUser());
 
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(new Date()), 30000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    // Update user when screen loads
+    setUser(getCurrentUser());
   }, []);
 
   const today = new Date();
@@ -44,7 +49,31 @@ export default function HomeScreen({ navigation }: Props) {
       >
         {/* ── HEADER ── */}
         <View style={styles.header}>
-          <Text style={styles.appTitle}>📓 Digital Planner</Text>
+          <View style={styles.headerTop}>
+            <Text style={styles.appTitle}>📓 Digital Planner</Text>
+            <TouchableOpacity
+              style={styles.accountBtn}
+              onPress={() => navigation.navigate('Account')}
+              activeOpacity={0.7}
+            >
+              {user ? (
+                <Text style={styles.accountBtnAvatar}>
+                  {user.displayName
+                    ? user.displayName.charAt(0).toUpperCase()
+                    : '👤'}
+                </Text>
+              ) : (
+                <Text style={styles.accountBtnText}>👤</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {user && (
+            <View style={styles.syncBadge}>
+              <Text style={styles.syncBadgeText}>☁️ Synced as {user.displayName || user.email}</Text>
+            </View>
+          )}
+
           <Text style={styles.timeText}>
             {format(currentTime, 'HH:mm')}
           </Text>
@@ -187,12 +216,56 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
   scroll: { padding: 16, paddingBottom: 40 },
 
-  header: { alignItems: 'center', marginBottom: 24, paddingTop: 8 },
+  header: { 
+    alignItems: 'center', 
+    marginBottom: 24, 
+    paddingTop: 8,
+    width: '100%',
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 4,
+    marginBottom: 12,
+  },
   appTitle: {
     fontSize: 26,
     fontWeight: '800',
     color: COLORS.text,
+  },
+  accountBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.cardBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
+  accountBtnText: {
+    fontSize: 22,
+  },
+  accountBtnAvatar: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.highlight,
+  },
+  syncBadge: {
+    backgroundColor: COLORS.todayBg,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.success,
+  },
+  syncBadgeText: {
+    color: COLORS.success,
+    fontSize: 11,
+    fontWeight: '700',
   },
   timeText: {
     fontSize: 52,
