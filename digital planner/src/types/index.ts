@@ -62,6 +62,8 @@ export interface NoteEntry {
 }
 
 export type RootStackParamList = {
+  Login: undefined;
+  SignUp: undefined;
   Home: undefined;
   YearlyView: { year: number };
   MonthlyView: { year: number; month: number };
@@ -71,4 +73,5 @@ export type RootStackParamList = {
   NotesJournal: undefined;
   NoteEditor: { noteId?: string; type: 'note' | 'journal' };
   PdfViewer: { noteId: string; pdfUri: string; pdfName: string };
+  Account: undefined;
 };
