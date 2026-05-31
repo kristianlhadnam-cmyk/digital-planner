@@ -25,6 +25,7 @@ export default function AccountScreen({ navigation }: Props) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [syncResult, setSyncResult] = useState<string>('');
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -33,12 +34,25 @@ export default function AccountScreen({ navigation }: Props) {
 
   const handleSync = async () => {
     setSyncing(true);
+    setSyncResult('');
     try {
-      await syncFromCloud();
+      const result = await syncFromCloud();
       setLastSync(new Date());
-      Alert.alert('✅ Synced', 'Your data has been synced from the cloud.');
-    } catch (e) {
-      Alert.alert('Sync Error', 'Could not sync. Check your internet.');
+      
+      const message = `Downloaded:
+📝 ${result.notesCount} notes
+✅ ${result.todosCount} todo lists
+📅 ${result.eventsCount} days with events
+✏️ ${result.drawingsCount} days with drawings`;
+      
+      setSyncResult(message);
+      
+      Alert.alert(
+        '✅ Sync Complete!',
+        message + '\n\nGo back to home to see your data!'
+      );
+    } catch (e: any) {
+      Alert.alert('Sync Error', 'Could not sync: ' + String(e.message || e));
     }
     setSyncing(false);
   };
@@ -111,38 +125,60 @@ export default function AccountScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* Sync Status */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Sync Status</Text>
-          
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Status:</Text>
-            <Text style={[styles.infoValue, { color: COLORS.success }]}>
-              ✓ Connected
-            </Text>
-          </View>
+        {/* SYNC BUTTON - PROMINENT */}
+        <TouchableOpacity
+          style={[styles.bigSyncBtn, syncing && styles.bigSyncBtnDisabled]}
+          onPress={handleSync}
+          disabled={syncing}
+          activeOpacity={0.7}
+        >
+          {syncing ? (
+            <>
+              <ActivityIndicator size="large" color={COLORS.white} />
+              <Text style={styles.bigSyncText}>Syncing from cloud...</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.bigSyncIcon}>🔄</Text>
+              <Text style={styles.bigSyncText}>Download from Cloud</Text>
+              <Text style={styles.bigSyncSub}>
+                Tap to get latest data from other devices
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
 
-          {lastSync && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Last sync:</Text>
-              <Text style={styles.infoValue}>
+        {/* Sync Result */}
+        {syncResult ? (
+          <View style={styles.resultCard}>
+            <Text style={styles.resultTitle}>✅ Last Sync</Text>
+            <Text style={styles.resultText}>{syncResult}</Text>
+            {lastSync && (
+              <Text style={styles.resultTime}>
                 {format(lastSync, 'MMM d, HH:mm:ss')}
               </Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={[styles.syncBtn, syncing && styles.syncBtnDisabled]}
-            onPress={handleSync}
-            disabled={syncing}
-            activeOpacity={0.7}
-          >
-            {syncing ? (
-              <ActivityIndicator color={COLORS.white} />
-            ) : (
-              <Text style={styles.syncBtnText}>🔄 Sync Now</Text>
             )}
-          </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Instructions */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📖 How to Use Sync</Text>
+          <Text style={styles.instructionStep}>
+            <Text style={styles.bold}>1.</Text> On device A: Create notes, events, etc.
+          </Text>
+          <Text style={styles.instructionStep}>
+            <Text style={styles.bold}>2.</Text> Data uploads to cloud automatically
+          </Text>
+          <Text style={styles.instructionStep}>
+            <Text style={styles.bold}>3.</Text> On device B: Tap "🔄 Download from Cloud"
+          </Text>
+          <Text style={styles.instructionStep}>
+            <Text style={styles.bold}>4.</Text> Your data appears on device B!
+          </Text>
+          <Text style={styles.tipText}>
+            💡 Tip: Tap sync each time you switch devices
+          </Text>
         </View>
 
         {/* Account Info */}
@@ -277,6 +313,58 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
+  bigSyncBtn: {
+    backgroundColor: COLORS.highlight,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    marginBottom: 16,
+    minHeight: 140,
+    justifyContent: 'center',
+  },
+  bigSyncBtnDisabled: {
+    opacity: 0.7,
+  },
+  bigSyncIcon: { fontSize: 48, marginBottom: 8 },
+  bigSyncText: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 8,
+  },
+  bigSyncSub: {
+    color: COLORS.white,
+    fontSize: 12,
+    marginTop: 6,
+    opacity: 0.9,
+    textAlign: 'center',
+  },
+
+  resultCard: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.success,
+  },
+  resultTitle: {
+    color: COLORS.success,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  resultText: {
+    color: COLORS.text,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  resultTime: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 8,
+  },
+
   section: {
     backgroundColor: COLORS.cardBg,
     borderRadius: 12,
@@ -290,6 +378,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 12,
+  },
+  instructionStep: {
+    color: COLORS.text,
+    fontSize: 13,
+    lineHeight: 22,
+    marginBottom: 4,
+  },
+  bold: {
+    fontWeight: '800',
+    color: COLORS.highlight,
+  },
+  tipText: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 12,
+    backgroundColor: COLORS.todayBg,
+    padding: 10,
+    borderRadius: 8,
   },
   infoRow: {
     flexDirection: 'row',
@@ -312,23 +419,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: 'monospace',
   },
-
-  syncBtn: {
-    backgroundColor: COLORS.accent,
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  syncBtnDisabled: {
-    opacity: 0.6,
-  },
-  syncBtnText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-
   syncItem: {
     color: COLORS.textSecondary,
     fontSize: 13,
