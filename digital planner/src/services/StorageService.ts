@@ -13,8 +13,7 @@ import {
   syncTodosToCloud,
   syncDayDrawingsToCloud,
   syncCustomEventsToCloud,
-  getNotesFromCloud,
-  getTodosFromCloud,
+  downloadAllFromCloud,
 } from './CloudSyncService';
 import { auth } from './firebase';
 
@@ -28,6 +27,8 @@ const generateId = (): string => {
 const isLoggedIn = (): boolean => {
   return auth.currentUser !== null;
 };
+
+const CUSTOM_EVENTS_KEY = 'planner_custom_events_';
 
 // ─────────────────────────────────────────
 // DAY DRAWINGS
@@ -56,11 +57,8 @@ export const saveDayDrawings = async (
       `${STORAGE_KEYS.DAY_DRAWINGS}${dateString}`,
       JSON.stringify(drawings)
     );
-    // Sync to cloud if logged in
     if (isLoggedIn()) {
-      syncDayDrawingsToCloud(dateString, drawings).catch((e) =>
-        console.log('Cloud sync error:', e)
-      );
+      await syncDayDrawingsToCloud(dateString, drawings);
     }
   } catch (error) {
     console.error('Error saving day drawings:', error);
@@ -102,8 +100,6 @@ export const saveDaySchedule = async (
 // CUSTOM EVENTS
 // ─────────────────────────────────────────
 
-const CUSTOM_EVENTS_KEY = 'planner_custom_events_';
-
 export const getCustomEvents = async (
   dateString: string
 ): Promise<CalendarEvent[]> => {
@@ -128,9 +124,7 @@ export const saveCustomEvent = async (
       JSON.stringify(updated)
     );
     if (isLoggedIn()) {
-      syncCustomEventsToCloud(dateString, updated).catch((e) =>
-        console.log('Cloud sync error:', e)
-      );
+      await syncCustomEventsToCloud(dateString, updated);
     }
   } catch (error) {
     console.error('Error saving custom event:', error);
@@ -149,9 +143,7 @@ export const deleteCustomEvent = async (
       JSON.stringify(filtered)
     );
     if (isLoggedIn()) {
-      syncCustomEventsToCloud(dateString, filtered).catch((e) =>
-        console.log('Cloud sync error:', e)
-      );
+      await syncCustomEventsToCloud(dateString, filtered);
     }
   } catch (error) {
     console.error('Error deleting custom event:', error);
@@ -205,9 +197,7 @@ export const saveTodoLists = async (lists: TodoList[]): Promise<void> => {
       JSON.stringify(lists)
     );
     if (isLoggedIn()) {
-      syncTodosToCloud(lists).catch((e) =>
-        console.log('Cloud sync error:', e)
-      );
+      await syncTodosToCloud(lists);
     }
   } catch (error) {
     console.error('Error saving todo lists:', error);
@@ -303,9 +293,7 @@ export const saveNotes = async (notes: NoteEntry[]): Promise<void> => {
   try {
     await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(notes));
     if (isLoggedIn()) {
-      syncNotesToCloud(notes).catch((e) =>
-        console.log('Cloud sync error:', e)
-      );
+      await syncNotesToCloud(notes);
     }
   } catch (error) {
     console.error('Error saving notes:', error);
@@ -359,28 +347,81 @@ export const deleteNote = async (noteId: string): Promise<void> => {
 };
 
 // ─────────────────────────────────────────
-// SYNC FROM CLOUD (when user logs in)
+// FULL SYNC FROM CLOUD
 // ─────────────────────────────────────────
 
-export const syncFromCloud = async (): Promise<void> => {
-  if (!isLoggedIn()) return;
+export const syncFromCloud = async (): Promise<{
+  notesCount: number;
+  todosCount: number;
+  eventsCount: number;
+  drawingsCount: number;
+}> => {
+  if (!isLoggedIn()) {
+    console.log('Not logged in - cannot sync');
+    return { notesCount: 0, todosCount: 0, eventsCount: 0, drawingsCount: 0 };
+  }
 
   try {
-    const [cloudNotes, cloudTodos] = await Promise.all([
-      getNotesFromCloud(),
-      getTodosFromCloud(),
-    ]);
-
-    if (cloudNotes.length > 0) {
-      await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(cloudNotes));
+    console.log('🔄 Downloading all data from cloud...');
+    const cloudData = await downloadAllFromCloud();
+    
+    if (!cloudData) {
+      console.log('No cloud data');
+      return { notesCount: 0, todosCount: 0, eventsCount: 0, drawingsCount: 0 };
     }
-    if (cloudTodos.length > 0) {
+
+    const { notes, todos, allEvents, allDrawings } = cloudData;
+
+    // Save notes locally
+    if (notes && notes.length > 0) {
+      await AsyncStorage.setItem(STORAGE_KEYS.NOTES, JSON.stringify(notes));
+      console.log('💾 Saved', notes.length, 'notes locally');
+    }
+
+    // Save todos locally
+    if (todos && todos.length > 0) {
       await AsyncStorage.setItem(
         STORAGE_KEYS.TODO_LISTS,
-        JSON.stringify(cloudTodos)
+        JSON.stringify(todos)
       );
+      console.log('💾 Saved', todos.length, 'todo lists locally');
     }
+
+    // Save custom events locally
+    let eventsCount = 0;
+    if (allEvents) {
+      for (const [dateStr, events] of Object.entries(allEvents)) {
+        await AsyncStorage.setItem(
+          `${CUSTOM_EVENTS_KEY}${dateStr}`,
+          JSON.stringify(events)
+        );
+        eventsCount++;
+      }
+      console.log('💾 Saved events for', eventsCount, 'days locally');
+    }
+
+    // Save drawings locally
+    let drawingsCount = 0;
+    if (allDrawings) {
+      for (const [dateStr, drawings] of Object.entries(allDrawings)) {
+        await AsyncStorage.setItem(
+          `${STORAGE_KEYS.DAY_DRAWINGS}${dateStr}`,
+          JSON.stringify(drawings)
+        );
+        drawingsCount++;
+      }
+      console.log('💾 Saved drawings for', drawingsCount, 'days locally');
+    }
+
+    console.log('✅ Sync complete!');
+    return {
+      notesCount: notes?.length || 0,
+      todosCount: todos?.length || 0,
+      eventsCount,
+      drawingsCount,
+    };
   } catch (e) {
-    console.log('Sync from cloud error:', e);
+    console.log('❌ Sync from cloud error:', e);
+    return { notesCount: 0, todosCount: 0, eventsCount: 0, drawingsCount: 0 };
   }
 };
