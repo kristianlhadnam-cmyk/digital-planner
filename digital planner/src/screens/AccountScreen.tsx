@@ -16,6 +16,7 @@ import { COLORS } from '../utils/constants';
 import CalendarHeader from '../components/CalendarHeader';
 import { getCurrentUser, logOut, AuthUser } from '../services/AuthService';
 import { syncFromCloud } from '../services/StorageService';
+import { diagnoseCalendars } from '../services/CalendarService';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Account'>;
@@ -26,6 +27,7 @@ export default function AccountScreen({ navigation }: Props) {
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [syncResult, setSyncResult] = useState<string>('');
+  const [checkingCal, setCheckingCal] = useState(false);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -38,15 +40,15 @@ export default function AccountScreen({ navigation }: Props) {
     try {
       const result = await syncFromCloud();
       setLastSync(new Date());
-      
+
       const message = `Downloaded:
 📝 ${result.notesCount} notes
 ✅ ${result.todosCount} todo lists
 📅 ${result.eventsCount} days with events
 ✏️ ${result.drawingsCount} days with drawings`;
-      
+
       setSyncResult(message);
-      
+
       Alert.alert(
         '✅ Sync Complete!',
         message + '\n\nGo back to home to see your data!'
@@ -55,6 +57,17 @@ export default function AccountScreen({ navigation }: Props) {
       Alert.alert('Sync Error', 'Could not sync: ' + String(e.message || e));
     }
     setSyncing(false);
+  };
+
+  const handleCheckCalendars = async () => {
+    setCheckingCal(true);
+    try {
+      const report = await diagnoseCalendars();
+      Alert.alert('📅 Calendar Report', report, [{ text: 'OK' }]);
+    } catch (e) {
+      Alert.alert('Error', 'Could not check calendars');
+    }
+    setCheckingCal(false);
   };
 
   const handleLogout = () => {
@@ -116,16 +129,14 @@ export default function AccountScreen({ navigation }: Props) {
           <Text style={styles.avatar}>
             {user.displayName ? user.displayName.charAt(0).toUpperCase() : '👤'}
           </Text>
-          <Text style={styles.userName}>
-            {user.displayName || 'User'}
-          </Text>
+          <Text style={styles.userName}>{user.displayName || 'User'}</Text>
           <Text style={styles.userEmail}>{user.email}</Text>
           <View style={styles.statusBadge}>
             <Text style={styles.statusBadgeText}>☁️ Cloud Sync Active</Text>
           </View>
         </View>
 
-        {/* SYNC BUTTON - PROMINENT */}
+        {/* SYNC BUTTON */}
         <TouchableOpacity
           style={[styles.bigSyncBtn, syncing && styles.bigSyncBtnDisabled]}
           onPress={handleSync}
@@ -161,9 +172,29 @@ export default function AccountScreen({ navigation }: Props) {
           </View>
         ) : null}
 
+        {/* CALENDAR DIAGNOSTIC */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📅 Calendar Connection</Text>
+          <Text style={styles.instructionStep}>
+            Check which Google/Outlook calendars are visible to this app on this device.
+          </Text>
+          <TouchableOpacity
+            style={styles.calBtn}
+            onPress={handleCheckCalendars}
+            disabled={checkingCal}
+            activeOpacity={0.7}
+          >
+            {checkingCal ? (
+              <ActivityIndicator color={COLORS.white} />
+            ) : (
+              <Text style={styles.calBtnText}>🔍 Check My Calendars</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
         {/* Instructions */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📖 How to Use Sync</Text>
+          <Text style={styles.sectionTitle}>📖 Sync Instructions</Text>
           <Text style={styles.instructionStep}>
             <Text style={styles.bold}>1.</Text> On device A: Create notes, events, etc.
           </Text>
@@ -184,17 +215,17 @@ export default function AccountScreen({ navigation }: Props) {
         {/* Account Info */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account Info</Text>
-          
+
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Name:</Text>
             <Text style={styles.infoValue}>{user.displayName || '—'}</Text>
           </View>
-          
+
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Email:</Text>
             <Text style={styles.infoValue}>{user.email}</Text>
           </View>
-          
+
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>User ID:</Text>
             <Text style={[styles.infoValue, styles.smallText]} numberOfLines={1}>
@@ -322,9 +353,7 @@ const styles = StyleSheet.create({
     minHeight: 140,
     justifyContent: 'center',
   },
-  bigSyncBtnDisabled: {
-    opacity: 0.7,
-  },
+  bigSyncBtnDisabled: { opacity: 0.7 },
   bigSyncIcon: { fontSize: 48, marginBottom: 8 },
   bigSyncText: {
     color: COLORS.white,
@@ -423,6 +452,19 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 13,
     paddingVertical: 4,
+  },
+
+  calBtn: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  calBtnText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
 
   logoutBtn: {
