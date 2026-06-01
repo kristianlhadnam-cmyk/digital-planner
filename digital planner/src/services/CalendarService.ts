@@ -1,5 +1,3 @@
-// FILE: digital-planner/src/services/CalendarService.ts
-
 import * as Calendar from 'expo-calendar';
 import { Platform, Linking } from 'react-native';
 import { CalendarEvent } from '../types';
@@ -9,7 +7,7 @@ export const requestCalendarPermissions = async (): Promise<boolean> => {
     const { status } = await Calendar.requestCalendarPermissionsAsync();
     return status === 'granted';
   } catch (error) {
-    console.error('Error requesting calendar permissions:', error);
+    console.error('Permission error:', error);
     return false;
   }
 };
@@ -18,12 +16,9 @@ export const getCalendars = async () => {
   try {
     const hasPermission = await requestCalendarPermissions();
     if (!hasPermission) return [];
-    const calendars = await Calendar.getCalendarsAsync(
-      Calendar.EntityTypes.EVENT
-    );
-    return calendars;
+    return await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
   } catch (error) {
-    console.error('Error getting calendars:', error);
+    console.error('Get calendars error:', error);
     return [];
   }
 };
@@ -35,42 +30,61 @@ export const getEventsForDate = async (
     const hasPermission = await requestCalendarPermissions();
     if (!hasPermission) return [];
 
-    const startDate = new Date(dateString);
-    startDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(dateString);
-    endDate.setHours(23, 59, 59, 999);
+    // Set time range for the FULL day
+    const startDate = new Date(dateString + 'T00:00:00');
+    const endDate = new Date(dateString + 'T23:59:59');
 
-    const calendars = await Calendar.getCalendarsAsync(
+    const allCalendars = await Calendar.getCalendarsAsync(
       Calendar.EntityTypes.EVENT
     );
-    const calendarIds = calendars.map((c) => c.id);
-    if (calendarIds.length === 0) return [];
 
+    console.log(`📅 [${dateString}] Querying ${allCalendars.length} calendars`);
+
+    if (allCalendars.length === 0) return [];
+
+    // Use ALL calendar IDs - no filtering
+    const allCalendarIds = allCalendars.map((c) => c.id);
+    
     const events = await Calendar.getEventsAsync(
-      calendarIds,
+      allCalendarIds,
       startDate,
       endDate
     );
 
-    return events.map((event) => ({
-      id: event.id,
-      title: event.title,
-      startDate:
-        event.startDate instanceof Date
-          ? event.startDate.toISOString()
-          : new Date(event.startDate).toISOString(),
-      endDate:
-        event.endDate instanceof Date
-          ? event.endDate.toISOString()
-          : new Date(event.endDate).toISOString(),
-      allDay: event.allDay || false,
-      calendarSource: detectCalendarSource(
-        calendars.find((c) => c.id === event.calendarId)
-      ),
-      color: calendars.find((c) => c.id === event.calendarId)?.color,
-    }));
+    console.log(`📅 [${dateString}] Found ${events.length} raw events`);
+    
+    // Log every single event for debugging
+    events.forEach((evt, i) => {
+      const cal = allCalendars.find(c => c.id === evt.calendarId);
+      console.log(`  ${i + 1}. "${evt.title}"`);
+      console.log(`     Calendar: ${cal?.title || 'unknown'}`);
+      console.log(`     Status: ${(evt as any).status || 'none'}`);
+      console.log(`     Availability: ${(evt as any).availability || 'none'}`);
+      console.log(`     AllDay: ${evt.allDay}`);
+      console.log(`     Start: ${evt.startDate}`);
+    });
+
+    // Convert to our format - INCLUDE EVERYTHING
+    return events.map((event) => {
+      const calendar = allCalendars.find((c) => c.id === event.calendarId);
+      return {
+        id: event.id,
+        title: event.title || '(No title)',
+        startDate:
+          event.startDate instanceof Date
+            ? event.startDate.toISOString()
+            : new Date(event.startDate).toISOString(),
+        endDate:
+          event.endDate instanceof Date
+            ? event.endDate.toISOString()
+            : new Date(event.endDate).toISOString(),
+        allDay: event.allDay || false,
+        calendarSource: detectCalendarSource(calendar),
+        color: calendar?.color || '#0f3460',
+      };
+    });
   } catch (error) {
-    console.error('Error getting events:', error);
+    console.error('Get events error:', error);
     return [];
   }
 };
@@ -83,42 +97,43 @@ export const getEventsForRange = async (
     const hasPermission = await requestCalendarPermissions();
     if (!hasPermission) return [];
 
-    const startDate = new Date(startDateStr);
-    startDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(endDateStr);
-    endDate.setHours(23, 59, 59, 999);
+    const startDate = new Date(startDateStr + 'T00:00:00');
+    const endDate = new Date(endDateStr + 'T23:59:59');
 
-    const calendars = await Calendar.getCalendarsAsync(
+    const allCalendars = await Calendar.getCalendarsAsync(
       Calendar.EntityTypes.EVENT
     );
-    const calendarIds = calendars.map((c) => c.id);
-    if (calendarIds.length === 0) return [];
 
+    if (allCalendars.length === 0) return [];
+
+    const allCalendarIds = allCalendars.map((c) => c.id);
+    
     const events = await Calendar.getEventsAsync(
-      calendarIds,
+      allCalendarIds,
       startDate,
       endDate
     );
 
-    return events.map((event) => ({
-      id: event.id,
-      title: event.title,
-      startDate:
-        event.startDate instanceof Date
-          ? event.startDate.toISOString()
-          : new Date(event.startDate).toISOString(),
-      endDate:
-        event.endDate instanceof Date
-          ? event.endDate.toISOString()
-          : new Date(event.endDate).toISOString(),
-      allDay: event.allDay || false,
-      calendarSource: detectCalendarSource(
-        calendars.find((c) => c.id === event.calendarId)
-      ),
-      color: calendars.find((c) => c.id === event.calendarId)?.color,
-    }));
+    return events.map((event) => {
+      const calendar = allCalendars.find((c) => c.id === event.calendarId);
+      return {
+        id: event.id,
+        title: event.title || '(No title)',
+        startDate:
+          event.startDate instanceof Date
+            ? event.startDate.toISOString()
+            : new Date(event.startDate).toISOString(),
+        endDate:
+          event.endDate instanceof Date
+            ? event.endDate.toISOString()
+            : new Date(event.endDate).toISOString(),
+        allDay: event.allDay || false,
+        calendarSource: detectCalendarSource(calendar),
+        color: calendar?.color || '#0f3460',
+      };
+    });
   } catch (error) {
-    console.error('Error getting events for range:', error);
+    console.error('Range events error:', error);
     return [];
   }
 };
@@ -131,6 +146,7 @@ const detectCalendarSource = (
   if (!source) return 'local';
   const sourceName = (source.name || '').toLowerCase();
   const sourceType = (source.type || '').toLowerCase();
+  
   if (sourceName.includes('google') || sourceType.includes('google'))
     return 'google';
   if (
@@ -151,6 +167,62 @@ export const openExternalCalendar = async (): Promise<void> => {
       await Linking.openURL('content://com.android.calendar/time/');
     }
   } catch (error) {
-    console.error('Error opening calendar:', error);
+    console.error('Open calendar error:', error);
+  }
+};
+
+export const diagnoseCalendars = async (): Promise<string> => {
+  try {
+    const hasPermission = await requestCalendarPermissions();
+    if (!hasPermission) {
+      return '❌ NO PERMISSION\n\nSettings → Apps → Digital Planner → Permissions → Calendar → Allow';
+    }
+
+    const calendars = await Calendar.getCalendarsAsync(
+      Calendar.EntityTypes.EVENT
+    );
+
+    if (calendars.length === 0) {
+      return '⚠️ NO CALENDARS FOUND';
+    }
+
+    // Also get TODAY's events for context
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(today);
+    endDate.setHours(23, 59, 59, 999);
+    
+    const calendarIds = calendars.map(c => c.id);
+    const todayEvents = await Calendar.getEventsAsync(
+      calendarIds,
+      startDate,
+      endDate
+    );
+
+    let report = `📅 ${calendars.length} CALENDARS, ${todayEvents.length} EVENTS TODAY\n\n`;
+    
+    report += `═══ CALENDARS ═══\n\n`;
+    calendars.forEach((cal, i) => {
+      report += `${i + 1}. "${cal.title}"\n`;
+      report += `   📧 ${cal.source?.name || 'unknown'}\n`;
+      report += `   🔧 ${cal.source?.type || 'unknown'}\n\n`;
+    });
+
+    if (todayEvents.length > 0) {
+      report += `\n═══ TODAY'S EVENTS ═══\n\n`;
+      todayEvents.forEach((evt, i) => {
+        const cal = calendars.find(c => c.id === evt.calendarId);
+        report += `${i + 1}. "${evt.title}"\n`;
+        report += `   📅 ${cal?.title}\n`;
+        if ((evt as any).status) report += `   ℹ️ Status: ${(evt as any).status}\n`;
+        if ((evt as any).availability) report += `   👁️ Availability: ${(evt as any).availability}\n`;
+        report += `\n`;
+      });
+    }
+
+    return report;
+  } catch (error: any) {
+    return '❌ Error: ' + String(error.message || error);
   }
 };
