@@ -40,11 +40,12 @@ const generateId = (): string => `sticker_${Date.now()}_${Math.random().toString
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 // ─── Mini Canvas Component (for drawing inside modal) ───
-function MiniCanvas({ onSave, onCancel }: { onSave: (paths: DrawingPath[]) => void; onCancel: () => void }) {
+function MiniCanvas({ onSave, onCancel }: { onSave: (paths: DrawingPath[], hasBg: boolean) => void; onCancel: () => void }) {
   const [paths, setPaths] = useState<DrawingPath[]>([]);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
   const [color, setColor] = useState(PEN_COLORS[0]);
   const [size, setSize] = useState(PEN_SIZES[1]);
+  const [hasBg, setHasBg] = useState(true);
   const pathsRef = useRef<DrawingPath[]>([]);
   const currentRef = useRef<Point[]>([]);
   const colorRef = useRef(color);
@@ -98,26 +99,33 @@ function MiniCanvas({ onSave, onCancel }: { onSave: (paths: DrawingPath[]) => vo
           <TouchableOpacity className="bg-accent px-4 py-2 rounded-lg" onPress={onCancel}>
             <Text className="text-text-primary font-semibold">Avbryt</Text>
           </TouchableOpacity>
-          <TouchableOpacity className="bg-highlight px-4 py-2 rounded-lg" onPress={() => onSave(paths)}>
+          <TouchableOpacity className="bg-highlight px-4 py-2 rounded-lg" onPress={() => onSave(paths, hasBg)}>
             <Text className="text-white font-bold">✔ Lagre</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Toolbar */}
-      <View className="flex-row items-center gap-2 px-3 py-2 bg-secondary">
-        <Text className="text-text-secondary text-xs font-bold">Farge:</Text>
-        {PEN_COLORS.map((c) => (
-          <TouchableOpacity key={c} className="w-6 h-6 rounded-full border-2" style={{ backgroundColor: c, borderColor: color === c ? '#fff' : 'transparent' }} onPress={() => setColor(c)} />
-        ))}
-        <View className="w-px h-6 bg-card-border mx-1" />
-        <Text className="text-text-secondary text-xs font-bold">Str:</Text>
-        {PEN_SIZES.map((s) => (
-          <TouchableOpacity key={s} className={`w-[30px] h-[30px] rounded-full bg-card items-center justify-center border-2 ${size === s ? 'border-highlight' : 'border-transparent'}`} onPress={() => setSize(s)}>
-            <View className="rounded-full bg-text-primary" style={{ width: s * 2, height: s * 2 }} />
-          </TouchableOpacity>
-        ))}
+      {/* Background toggle + toolbar */}
+      <View className="flex-row items-center justify-between px-3 py-2 bg-secondary border-b border-card-border">
+        <View className="flex-row items-center gap-2">
+          <Text className="text-text-secondary text-xs font-bold">Farge:</Text>
+          {PEN_COLORS.map((c) => (
+            <TouchableOpacity key={c} className="w-6 h-6 rounded-full border-2" style={{ backgroundColor: c, borderColor: color === c ? '#fff' : 'transparent' }} onPress={() => setColor(c)} />
+          ))}
+          <View className="w-px h-6 bg-card-border mx-1" />
+          <Text className="text-text-secondary text-xs font-bold">Str:</Text>
+          {PEN_SIZES.map((s) => (
+            <TouchableOpacity key={s} className={`w-[30px] h-[30px] rounded-full bg-card items-center justify-center border-2 ${size === s ? 'border-highlight' : 'border-transparent'}`} onPress={() => setSize(s)}>
+              <View className="rounded-full bg-text-primary" style={{ width: s * 2, height: s * 2 }} />
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity className={`px-3 py-1.5 rounded-lg border ${hasBg ? 'bg-accent border-highlight' : 'bg-card border-card-border'}`} onPress={() => setHasBg(!hasBg)}>
+          <Text className={`text-xs font-bold ${hasBg ? 'text-white' : 'text-text-secondary'}`}>▣ Bakgrunn</Text>
+        </TouchableOpacity>
       </View>
+
+
 
       {/* Canvas */}
       <View className="flex-1 m-3 bg-canvas-bg rounded-xl overflow-hidden border border-card-border" {...pan.panHandlers} collapsable={false}>
@@ -161,7 +169,7 @@ function DrawingStickerView({ sticker, onUpdate, onDelete }: { sticker: DrawingS
       style={{ position: 'absolute', left: pos.x, top: pos.y, width: 150, height: 150, zIndex: 50 }}
       {...pan.panHandlers}
     >
-      <View className="flex-1 bg-canvas-bg rounded-xl border-2 border-highlight overflow-hidden shadow-lg">
+      <View className={`flex-1 rounded-xl border-2 overflow-hidden shadow-lg ${sticker.hasBackground ? 'bg-canvas-bg border-highlight' : 'border-transparent bg-transparent'}`}>
         <TouchableOpacity className="absolute top-1 right-1 z-10 w-6 h-6 bg-error/80 rounded-full items-center justify-center" onPress={onDelete}>
           <Text className="text-white text-xs font-bold">✕</Text>
         </TouchableOpacity>
@@ -202,7 +210,7 @@ export default function DailyViewScreen({ navigation, route }: Props) {
     try { await saveDayStickers(date, newStickers); } catch {}
   };
 
-  const handleSaveSticker = async (drawingPaths: DrawingPath[]) => {
+  const handleSaveSticker = async (drawingPaths: DrawingPath[], hasBg: boolean = true) => {
     if (drawingPaths.length === 0) { setShowModal(false); return; }
     const newSticker: DrawingSticker = {
       id: generateId(),
@@ -211,6 +219,7 @@ export default function DailyViewScreen({ navigation, route }: Props) {
       positionY: 0,
       width: 150,
       height: 150,
+      hasBackground: hasBg,
       createdAt: new Date().toISOString(),
     };
     await persistStickers([...stickers, newSticker]);

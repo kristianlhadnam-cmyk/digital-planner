@@ -17,6 +17,7 @@ export interface DrawingSticker {
   positionY: number;
   width: number;
   height: number;
+  hasBackground: boolean;
   createdAt: string;
 }
 
