@@ -354,9 +354,14 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
 
     async function renderAtScale(pageNum, scale) {
       const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: scale });
+      // Use devicePixelRatio for crisp rendering at any zoom level
+      const deviceScale = window.devicePixelRatio || 1;
+      const adjustedScale = scale * deviceScale;
+      const viewport = page.getViewport({ scale: adjustedScale });
       canvas.width = viewport.width;
       canvas.height = viewport.height;
+      canvas.style.width = (viewport.width / deviceScale) + 'px';
+      canvas.style.height = (viewport.height / deviceScale) + 'px';
       await page.render({ canvasContext: ctx, viewport: viewport }).promise;
       sendMessage({ type: 'pageChanged', page: pageNum });
     }
