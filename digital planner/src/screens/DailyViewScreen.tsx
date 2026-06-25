@@ -11,6 +11,7 @@ import {
   PanResponder,
   Modal,
   Dimensions,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,7 +19,7 @@ import { RouteProp } from '@react-navigation/native';
 import { format, startOfWeek } from 'date-fns';
 import Svg, { Path } from 'react-native-svg';
 import { RootStackParamList, DrawingPath, DrawingSticker, Point, CalendarEvent } from '../types';
-import { COLORS, PEN_COLORS, PEN_COLORS_LIGHT, PEN_SIZES } from '../utils/constants';
+import { COLORS, PEN_COLORS, PEN_SIZES } from '../utils/constants';
 import { getDayData, getHoursOfDay, getPrevDate, getNextDate } from '../utils/dateUtils';
 import CalendarHeader from '../components/CalendarHeader';
 import NavigationButton from '../components/NavigationButton';
@@ -39,7 +40,7 @@ type Props = {
 const generateId = (): string => `sticker_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-// ─── Mini Canvas Component (for drawing inside modal) ───
+// ─── Mini Canvas Component ───
 function MiniCanvas({ onSave, onCancel }: { onSave: (paths: DrawingPath[], hasBg: boolean) => void; onCancel: () => void }) {
   const [paths, setPaths] = useState<DrawingPath[]>([]);
   const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
@@ -83,52 +84,46 @@ function MiniCanvas({ onSave, onCancel }: { onSave: (paths: DrawingPath[], hasBg
 
   const ptsToPath = (pts: Point[]): string => {
     if (!pts.length) return '';
-    if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y} L ${pts[0].x + 0.5} ${pts[0].y + 0.5}`;
     return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   };
 
   return (
-    <View className="flex-1 bg-background/95">
-      {/* Top bar */}
-      <View className="flex-row justify-between items-center px-4 py-3 bg-primary border-b border-card-border">
-        <Text className="text-text-primary text-lg font-bold">✏️ Tegn</Text>
-        <View className="flex-row gap-3">
-          <TouchableOpacity className="bg-card px-4 py-2 rounded-lg border border-card-border" onPress={() => { pathsRef.current = []; setPaths([]); }}>
-            <Text className="text-text-secondary">Tøm</Text>
+    <View style={mcs.container}>
+      <View style={mcs.topBar}>
+        <Text style={mcs.topTitle}>✏️ Tegn</Text>
+        <View style={mcs.topActions}>
+          <TouchableOpacity style={mcs.btnOutline} onPress={() => { pathsRef.current = []; setPaths([]); }}>
+            <Text style={mcs.btnOutlineText}>Tøm</Text>
           </TouchableOpacity>
-          <TouchableOpacity className="bg-accent px-4 py-2 rounded-lg" onPress={onCancel}>
-            <Text className="text-text-primary font-semibold">Avbryt</Text>
+          <TouchableOpacity style={mcs.btnSecondary} onPress={onCancel}>
+            <Text style={mcs.btnText}>Avbryt</Text>
           </TouchableOpacity>
-          <TouchableOpacity className="bg-highlight px-4 py-2 rounded-lg" onPress={() => onSave(paths, hasBg)}>
-            <Text className="text-white font-bold">✔ Lagre</Text>
+          <TouchableOpacity style={mcs.btnPrimary} onPress={() => onSave(paths, hasBg)}>
+            <Text style={mcs.btnPrimaryText}>✔ Lagre</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Background toggle + toolbar */}
-      <View className="flex-row items-center justify-between px-3 py-2 bg-secondary border-b border-card-border">
-        <View className="flex-row items-center gap-2">
-          <Text className="text-text-secondary text-xs font-bold">Farge:</Text>
+      <View style={mcs.toolbar}>
+        <View style={mcs.toolLeft}>
+          <Text style={mcs.toolLabel}>Farge:</Text>
           {PEN_COLORS.map((c) => (
-            <TouchableOpacity key={c} className="w-6 h-6 rounded-full border-2" style={{ backgroundColor: c, borderColor: color === c ? '#fff' : 'transparent' }} onPress={() => setColor(c)} />
+            <TouchableOpacity key={c} style={[mcs.colorBtn, { backgroundColor: c }, color === c && mcs.colorSelected]} onPress={() => setColor(c)} />
           ))}
-          <View className="w-px h-6 bg-card-border mx-1" />
-          <Text className="text-text-secondary text-xs font-bold">Str:</Text>
+          <View style={mcs.separator} />
+          <Text style={mcs.toolLabel}>Str:</Text>
           {PEN_SIZES.map((s) => (
-            <TouchableOpacity key={s} className={`w-[30px] h-[30px] rounded-full bg-card items-center justify-center border-2 ${size === s ? 'border-highlight' : 'border-transparent'}`} onPress={() => setSize(s)}>
-              <View className="rounded-full bg-text-primary" style={{ width: s * 2, height: s * 2 }} />
+            <TouchableOpacity key={s} style={[mcs.sizeBtn, size === s && mcs.sizeSelected]} onPress={() => setSize(s)}>
+              <View style={[mcs.sizeDot, { width: s * 2, height: s * 2 }]} />
             </TouchableOpacity>
           ))}
         </View>
-        <TouchableOpacity className={`px-3 py-1.5 rounded-lg border ${hasBg ? 'bg-accent border-highlight' : 'bg-card border-card-border'}`} onPress={() => setHasBg(!hasBg)}>
-          <Text className={`text-xs font-bold ${hasBg ? 'text-white' : 'text-text-secondary'}`}>▣ Bakgrunn</Text>
+        <TouchableOpacity style={[mcs.bgToggle, hasBg && mcs.bgToggleActive]} onPress={() => setHasBg(!hasBg)}>
+          <Text style={[mcs.bgToggleText, hasBg && mcs.bgToggleTextActive]}>▣ Bakgrunn</Text>
         </TouchableOpacity>
       </View>
 
-
-
-      {/* Canvas */}
-      <View className="flex-1 m-3 bg-canvas-bg rounded-xl overflow-hidden border border-card-border" {...pan.panHandlers} collapsable={false}>
+      <View style={mcs.canvas} {...pan.panHandlers} collapsable={false}>
         <Svg width="100%" height="100%" pointerEvents="none">
           {paths.map((p) => <Path key={p.id} d={ptsToPath(p.points)} stroke={p.color} strokeWidth={p.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" />)}
           {currentPoints.length > 0 && <Path d={ptsToPath(currentPoints)} stroke={color} strokeWidth={size} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
@@ -138,7 +133,34 @@ function MiniCanvas({ onSave, onCancel }: { onSave: (paths: DrawingPath[], hasBg
   );
 }
 
-// ─── Sticker Component (draggable on schedule) ───
+const mcs = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0b1120' },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#1e293b', borderBottomWidth: 1, borderBottomColor: '#334155' },
+  topTitle: { color: '#f1f5f9', fontSize: 18, fontWeight: '700' },
+  topActions: { flexDirection: 'row', gap: 12 },
+  btnOutline: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#1e293b', borderRadius: 8, borderWidth: 1, borderColor: '#334155' },
+  btnOutlineText: { color: '#94a3b8' },
+  btnSecondary: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#2563eb', borderRadius: 8 },
+  btnText: { color: '#f1f5f9', fontWeight: '600' },
+  btnPrimary: { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#3b82f6', borderRadius: 8 },
+  btnPrimaryText: { color: '#ffffff', fontWeight: '700' },
+  toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#0f172a', borderBottomWidth: 1, borderBottomColor: '#334155' },
+  toolLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  toolLabel: { color: '#94a3b8', fontSize: 11, fontWeight: '700', marginRight: 4 },
+  colorBtn: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: 'transparent' },
+  colorSelected: { borderColor: '#ffffff' },
+  separator: { width: 1, height: 24, backgroundColor: '#334155', marginHorizontal: 4 },
+  sizeBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#1e293b', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+  sizeSelected: { borderColor: '#3b82f6' },
+  sizeDot: { borderRadius: 20, backgroundColor: '#f1f5f9' },
+  bgToggle: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#334155', backgroundColor: '#1e293b' },
+  bgToggleActive: { backgroundColor: '#2563eb', borderColor: '#3b82f6' },
+  bgToggleText: { fontSize: 11, fontWeight: '700', color: '#94a3b8' },
+  bgToggleTextActive: { color: '#ffffff' },
+  canvas: { flex: 1, margin: 12, backgroundColor: '#f8fafc', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
+});
+
+// ─── Sticker Component ───
 function DrawingStickerView({ sticker, onUpdate, onDelete }: { sticker: DrawingSticker; onUpdate: (s: DrawingSticker) => void; onDelete: () => void }) {
   const [pos, setPos] = useState({ x: sticker.positionX, y: sticker.positionY });
   const dragStart = useRef({ x: 0, y: 0 });
@@ -159,19 +181,13 @@ function DrawingStickerView({ sticker, onUpdate, onDelete }: { sticker: DrawingS
     },
   })).current;
 
-  const ptsToPath = (pts: Point[]): string => {
-    if (!pts.length) return '';
-    return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  };
+  const ptsToPath = (pts: Point[]): string => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
   return (
-    <View
-      style={{ position: 'absolute', left: pos.x, top: pos.y, width: 150, height: 150, zIndex: 50 }}
-      {...pan.panHandlers}
-    >
-      <View className={`flex-1 rounded-xl border-2 overflow-hidden shadow-lg ${sticker.hasBackground ? 'bg-canvas-bg border-highlight' : 'border-transparent bg-transparent'}`}>
-        <TouchableOpacity className="absolute top-1 right-1 z-10 w-6 h-6 bg-error/80 rounded-full items-center justify-center" onPress={onDelete}>
-          <Text className="text-white text-xs font-bold">✕</Text>
+    <View style={{ position: 'absolute', left: pos.x, top: pos.y, width: 150, height: 150, zIndex: 50 }} {...pan.panHandlers}>
+      <View style={[sticker.hasBackground ? svs.hasBg : svs.noBg]}>
+        <TouchableOpacity style={svs.deleteBtn} onPress={onDelete}>
+          <Text style={svs.deleteBtnText}>✕</Text>
         </TouchableOpacity>
         <Svg width="100%" height="100%" pointerEvents="none">
           {sticker.drawings.map((p) => <Path key={p.id} d={ptsToPath(p.points)} stroke={p.color} strokeWidth={p.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" />)}
@@ -180,6 +196,13 @@ function DrawingStickerView({ sticker, onUpdate, onDelete }: { sticker: DrawingS
     </View>
   );
 }
+
+const svs = StyleSheet.create({
+  hasBg: { flex: 1, backgroundColor: '#f8fafc', borderRadius: 12, borderWidth: 2, borderColor: '#3b82f6', overflow: 'hidden' },
+  noBg: { flex: 1, backgroundColor: 'transparent', borderRadius: 12, borderWidth: 2, borderColor: 'transparent', overflow: 'hidden' },
+  deleteBtn: { position: 'absolute', top: 4, right: 4, zIndex: 10, width: 24, height: 24, backgroundColor: 'rgba(239,68,68,0.8)', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  deleteBtnText: { color: '#ffffff', fontSize: 10, fontWeight: '700' },
+});
 
 // ─── Main Screen ───
 export default function DailyViewScreen({ navigation, route }: Props) {
@@ -237,7 +260,6 @@ export default function DailyViewScreen({ navigation, route }: Props) {
     ]);
   };
 
-  // Quick add event
   const parseEventText = (text: string): { time: string | null; title: string; allDay: boolean } => {
     const trimmed = text.trim();
     const allDayMatch = trimmed.match(/^(all\s*day|allday)\s*[-:]?\s*(.+)/i);
@@ -252,7 +274,7 @@ export default function DailyViewScreen({ navigation, route }: Props) {
 
   const handleQuickAdd = async () => {
     const text = quickAddText.trim();
-    if (!text) { Alert.alert('Tomt felt', 'Skriv en beskrivelse av hendelsen.'); return; }
+    if (!text) { Alert.alert('Tomt felt', 'Skriv en beskrivelse.'); return; }
     const parsed = parseEventText(text);
     if (!parsed.title) { Alert.alert('Mangler tittel', 'Legg til en tittel etter tidspunktet.'); return; }
     const eventDate = new Date(date + 'T00:00:00');
@@ -277,16 +299,13 @@ export default function DailyViewScreen({ navigation, route }: Props) {
   };
 
   const allEvents = [...calendarEvents, ...customEvents];
-  const eventsAtHour = (hour: string): CalendarEvent[] => {
-    const h = parseInt(hour.split(':')[0], 10);
-    return allEvents.filter((e) => !e.allDay && new Date(e.startDate).getHours() === h);
-  };
+  const eventsAtHour = (hour: string): CalendarEvent[] => allEvents.filter((e) => !e.allDay && new Date(e.startDate).getHours() === parseInt(hour.split(':')[0], 10));
   const weekStart = startOfWeek(dayData.date, { weekStartsOn: 1 });
   const isCustomEvent = (event: CalendarEvent) => event.id.startsWith('custom_');
   const allDayEvents = allEvents.filter((e) => e.allDay);
 
   return (
-    <SafeAreaView className="flex-1 bg-background">
+    <SafeAreaView style={styles.safe}>
       <CalendarHeader
         onHomePress={() => navigation.navigate('Home')}
         year={dayData.year}
@@ -298,92 +317,76 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         title={`${dayData.dayName.slice(0, 3)} ${dayData.dayOfMonth}`}
       />
 
-      {/* Day nav */}
-      <View className="flex-row justify-between items-center px-3 py-2.5 bg-primary">
-        <TouchableOpacity className="p-2" onPress={() => navigation.replace('DailyView', { date: getPrevDate(date) })}>
-          <Text className="text-accent text-sm font-semibold">← Forrige</Text>
+      <View style={styles.dayNav}>
+        <TouchableOpacity style={styles.dayNavBtn} onPress={() => navigation.replace('DailyView', { date: getPrevDate(date) })}>
+          <Text style={styles.navText}>← Forrige</Text>
         </TouchableOpacity>
-        <View className="items-center">
-          <Text className={`text-xl font-extrabold ${dayData.isToday ? 'text-highlight' : 'text-text-primary'}`}>{dayData.dayName}</Text>
-          <Text className="text-text-secondary text-sm mt-0.5">{dayData.monthName} {dayData.dayOfMonth}, {dayData.year}</Text>
-          {dayData.isToday && <View className="bg-accent rounded px-2 py-0.5 mt-1"><Text className="text-highlight text-xs font-extrabold">I DAG</Text></View>}
+        <View style={styles.dayNavCenter}>
+          <Text style={[styles.dayNameBig, dayData.isToday && styles.todayColor]}>{dayData.dayName}</Text>
+          <Text style={styles.dayDateBig}>{dayData.monthName} {dayData.dayOfMonth}, {dayData.year}</Text>
+          {dayData.isToday && <View style={styles.todayBadge}><Text style={styles.todayBadgeText}>I DAG</Text></View>}
         </View>
-        <TouchableOpacity className="p-2" onPress={() => navigation.replace('DailyView', { date: getNextDate(date) })}>
-          <Text className="text-accent text-sm font-semibold">Neste →</Text>
+        <TouchableOpacity style={styles.dayNavBtn} onPress={() => navigation.replace('DailyView', { date: getNextDate(date) })}>
+          <Text style={styles.navText}>Neste →</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Quick actions */}
-      <View className="flex-row justify-center gap-2.5 py-2 px-3 bg-primary border-b border-card-border">
+      <View style={styles.quickActions}>
         <NavigationButton title="✅ Gjøremål" variant="small" onPress={() => navigation.navigate('TodoList')} />
         <NavigationButton title="📝 Notater" variant="small" onPress={() => navigation.navigate('NotesJournal')} />
         <NavigationButton title="📅 Kalender" variant="small" onPress={openExternalCalendar} />
       </View>
 
-      {/* Quick add row + drawing button */}
-      <View className="flex-row px-3 pt-2 pb-1 gap-2">
-        <TouchableOpacity className="flex-1 bg-highlight p-3 rounded-xl items-center" onPress={() => setShowQuickAdd(true)} activeOpacity={0.7}>
-          <Text className="text-white text-sm font-bold">➕ Legg til hendelse</Text>
+      <View style={styles.actionRow}>
+        <TouchableOpacity style={styles.addBtn} onPress={() => setShowQuickAdd(true)} activeOpacity={0.7}>
+          <Text style={styles.addBtnText}>➕ Legg til hendelse</Text>
         </TouchableOpacity>
-        <TouchableOpacity className="bg-accent p-3 rounded-xl items-center justify-center" onPress={() => setShowModal(true)} activeOpacity={0.7}>
-          <Text className="text-white text-lg">✏️</Text>
+        <TouchableOpacity style={styles.drawBtn} onPress={() => setShowModal(true)} activeOpacity={0.7}>
+          <Text style={styles.drawBtnText}>✏️</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Quick add form */}
       {showQuickAdd && (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={120}>
-          <View className="mx-3 mb-2 bg-card p-3.5 rounded-xl border-2 border-highlight">
-            <View className="flex-row justify-between items-center mb-1.5">
-              <Text className="text-highlight text-base font-bold">➕ Ny hendelse</Text>
+          <View style={styles.quickAddForm}>
+            <View style={styles.quickAddHeader}>
+              <Text style={styles.quickAddLabel}>➕ Ny hendelse</Text>
               <TouchableOpacity onPress={() => { setQuickAddText(''); setShowQuickAdd(false); }}>
-                <Text className="text-text-secondary text-lg font-bold p-1">✕</Text>
+                <Text style={styles.quickAddClose}>✕</Text>
               </TouchableOpacity>
             </View>
-            <Text className="text-text-secondary text-xs mb-2">F.eks. "9:00 Møte" eller "Hel dag - Ferie"</Text>
-            <TextInput
-              className="bg-background rounded-lg p-3 text-text-primary text-base mb-2.5 border border-card-border"
-              value={quickAddText} onChangeText={setQuickAddText}
-              placeholder="Skriv tid + hendelse..." placeholderTextColor={COLORS.textSecondary}
-              autoFocus returnKeyType="done" onSubmitEditing={handleQuickAdd}
-            />
-            <TouchableOpacity className="bg-success rounded-lg py-3 items-center" onPress={handleQuickAdd} activeOpacity={0.7}>
-              <Text className="text-white font-bold text-sm">✓ Legg til</Text>
+            <Text style={styles.quickAddHint}>F.eks. "9:00 Møte" eller "Hel dag - Ferie"</Text>
+            <TextInput style={styles.quickAddInput} value={quickAddText} onChangeText={setQuickAddText} placeholder="Skriv tid + hendelse..." placeholderTextColor={COLORS.textSecondary} autoFocus returnKeyType="done" onSubmitEditing={handleQuickAdd} />
+            <TouchableOpacity style={styles.quickAddSubmit} onPress={handleQuickAdd} activeOpacity={0.7}>
+              <Text style={styles.quickAddSubmitText}>✓ Legg til</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       )}
 
-      {/* Main scrollable schedule */}
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 12, paddingBottom: 100 }}
-        nestedScrollEnabled
-      >
-        {/* All day events */}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} nestedScrollEnabled>
         {allDayEvents.map((e) => (
-          <View key={e.id} className="bg-card p-2.5 rounded-lg mb-2 flex-row items-center gap-2 border-l-4" style={{ borderLeftColor: e.color ?? COLORS.accent }}>
-            <Text className="text-highlight text-xs font-extrabold bg-accent px-1.5 py-0.5 rounded">HEL DAG</Text>
-            <Text className="text-text-primary text-sm font-semibold flex-1">{e.title}</Text>
-            {isCustomEvent(e) && <TouchableOpacity onPress={() => deleteCustomEvt(e.id, e.title)}><Text className="text-base p-1">🗑️</Text></TouchableOpacity>}
+          <View key={e.id} style={[styles.allDayEvent, { borderLeftColor: e.color ?? COLORS.accent }]}>
+            <Text style={styles.allDayBadge}>HEL DAG</Text>
+            <Text style={styles.allDayTitle}>{e.title}</Text>
+            {isCustomEvent(e) && <TouchableOpacity onPress={() => deleteCustomEvt(e.id, e.title)}><Text style={styles.deleteIcon}>🗑️</Text></TouchableOpacity>}
           </View>
         ))}
 
-        {/* Hourly schedule */}
         {hours.map((hour) => {
           const evts = eventsAtHour(hour);
           return (
-            <View key={hour} className="flex-row min-h-[44px] border-b border-card-border">
-              <View className="w-14 pt-2 pr-2 items-end"><Text className="text-text-secondary text-xs">{hour}</Text></View>
-              <View className="flex-1 py-1 pl-2 border-l border-card-border">
+            <View key={hour} style={styles.hourRow}>
+              <View style={styles.hourLabel}><Text style={styles.hourLabelText}>{hour}</Text></View>
+              <View style={styles.hourContent}>
                 {evts.map((e) => (
-                  <View key={e.id} className="bg-card p-2.5 rounded-md mb-1 flex-row items-center border-l-[3px]" style={{ borderLeftColor: e.color ?? COLORS.accent }}>
-                    <View className="flex-1">
-                      <Text className="text-text-secondary text-xs font-semibold">{format(new Date(e.startDate), 'HH:mm')} - {format(new Date(e.endDate), 'HH:mm')}</Text>
-                      <Text className="text-text-primary text-sm font-semibold mt-0.5">{e.title}</Text>
-                      {isCustomEvent(e) ? <Text className="text-highlight text-xs font-bold mt-0.5">📝 Lokal</Text> : <Text className="text-text-secondary text-[10px] uppercase mt-0.5">{e.calendarSource}</Text>}
+                  <View key={e.id} style={[styles.eventCard, { borderLeftColor: e.color ?? COLORS.accent }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.eventTime}>{format(new Date(e.startDate), 'HH:mm')} - {format(new Date(e.endDate), 'HH:mm')}</Text>
+                      <Text style={styles.eventTitle}>{e.title}</Text>
+                      {isCustomEvent(e) ? <Text style={styles.eventBadgeCustom}>📝 Lokal</Text> : <Text style={styles.eventSource}>{e.calendarSource}</Text>}
                     </View>
-                    {isCustomEvent(e) && <TouchableOpacity onPress={() => deleteCustomEvt(e.id, e.title)}><Text className="text-base p-1">🗑️</Text></TouchableOpacity>}
+                    {isCustomEvent(e) && <TouchableOpacity onPress={() => deleteCustomEvt(e.id, e.title)}><Text style={styles.deleteIcon}>🗑️</Text></TouchableOpacity>}
                   </View>
                 ))}
               </View>
@@ -392,32 +395,69 @@ export default function DailyViewScreen({ navigation, route }: Props) {
         })}
 
         {allEvents.length === 0 && !loading && (
-          <View className="items-center py-16">
-            <Text className="text-5xl mb-3.5">📅</Text>
-            <Text className="text-text-primary text-base font-semibold">Ingen hendelser i dag</Text>
-            <Text className="text-text-secondary text-sm mt-2">Trykk "Legg til hendelse" for å legge til noe</Text>
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>📅</Text>
+            <Text style={styles.emptyTitle}>Ingen hendelser i dag</Text>
+            <Text style={styles.emptyHint}>Trykk "Legg til hendelse" for å legge til noe</Text>
           </View>
         )}
 
-        {/* Drawing stickers pinned inside the scroll */}
         {stickers.map((sticker) => (
-          <View key={sticker.id} className="mb-3" style={{ zIndex: 50 }}>
+          <View key={sticker.id} style={{ height: 160, marginBottom: 8, position: 'relative', zIndex: 50 }}>
             <DrawingStickerView sticker={sticker} onUpdate={handleUpdateSticker} onDelete={() => handleDeleteSticker(sticker.id)} />
           </View>
         ))}
-
-        {/* Sticker counter */}
-        {stickers.length > 0 && (
-          <View className="items-center mt-4 mb-2">
-            <Text className="text-text-secondary text-xs">{stickers.length} tegning{stickers.length > 1 ? 'er' : ''} — dra for å flytte</Text>
-          </View>
-        )}
       </ScrollView>
 
-      {/* Drawing Modal */}
       <Modal visible={showModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowModal(false)}>
         <MiniCanvas onSave={handleSaveSticker} onCancel={() => setShowModal(false)} />
       </Modal>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#0b1120' },
+  dayNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#1e293b' },
+  dayNavBtn: { padding: 8 },
+  navText: { color: '#2563eb', fontSize: 13, fontWeight: '600' },
+  dayNavCenter: { alignItems: 'center' },
+  dayNameBig: { fontSize: 20, fontWeight: '800', color: '#f1f5f9' },
+  todayColor: { color: '#3b82f6' },
+  dayDateBig: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
+  todayBadge: { backgroundColor: '#1e3a5f', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginTop: 4 },
+  todayBadgeText: { color: '#3b82f6', fontSize: 10, fontWeight: '800' },
+  quickActions: { flexDirection: 'row', justifyContent: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#1e293b', borderBottomWidth: 1, borderBottomColor: '#334155' },
+  actionRow: { flexDirection: 'row', paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4, gap: 8 },
+  addBtn: { flex: 1, backgroundColor: '#3b82f6', padding: 12, borderRadius: 12, alignItems: 'center' },
+  addBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+  drawBtn: { backgroundColor: '#2563eb', padding: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center', width: 48 },
+  drawBtnText: { color: '#ffffff', fontSize: 20 },
+  quickAddForm: { marginHorizontal: 12, marginBottom: 8, backgroundColor: '#1e293b', padding: 14, borderRadius: 12, borderWidth: 2, borderColor: '#3b82f6' },
+  quickAddHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  quickAddLabel: { color: '#3b82f6', fontSize: 15, fontWeight: '700' },
+  quickAddClose: { color: '#94a3b8', fontSize: 18, fontWeight: '700', padding: 4 },
+  quickAddHint: { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
+  quickAddInput: { backgroundColor: '#0b1120', borderRadius: 8, padding: 12, color: '#f1f5f9', fontSize: 15, marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
+  quickAddSubmit: { backgroundColor: '#22c55e', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+  quickAddSubmitText: { color: '#ffffff', fontWeight: '700', fontSize: 14 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 12, paddingBottom: 100 },
+  allDayEvent: { backgroundColor: '#1e293b', padding: 10, borderRadius: 8, marginBottom: 8, borderLeftWidth: 4, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  allDayBadge: { color: '#3b82f6', fontSize: 10, fontWeight: '800', backgroundColor: '#1e3a5f', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, overflow: 'hidden' },
+  allDayTitle: { color: '#f1f5f9', fontSize: 14, fontWeight: '600', flex: 1 },
+  hourRow: { flexDirection: 'row', minHeight: 44, borderBottomWidth: 0.5, borderBottomColor: '#334155' },
+  hourLabel: { width: 56, paddingTop: 8, paddingRight: 8, alignItems: 'flex-end' },
+  hourLabelText: { color: '#94a3b8', fontSize: 12 },
+  hourContent: { flex: 1, paddingVertical: 4, borderLeftWidth: 1, borderLeftColor: '#334155', paddingLeft: 8 },
+  eventCard: { backgroundColor: '#1e293b', padding: 10, borderRadius: 6, marginBottom: 4, borderLeftWidth: 3, flexDirection: 'row', alignItems: 'center' },
+  eventTime: { color: '#94a3b8', fontSize: 11, fontWeight: '600' },
+  eventTitle: { color: '#f1f5f9', fontSize: 14, fontWeight: '600', marginTop: 2 },
+  eventSource: { color: '#94a3b8', fontSize: 10, textTransform: 'uppercase', marginTop: 2 },
+  eventBadgeCustom: { color: '#3b82f6', fontSize: 10, fontWeight: '700', marginTop: 2 },
+  deleteIcon: { fontSize: 16, padding: 4 },
+  emptyState: { alignItems: 'center', paddingVertical: 60 },
+  emptyIcon: { fontSize: 48, marginBottom: 14 },
+  emptyTitle: { color: '#f1f5f9', fontSize: 16, fontWeight: '600' },
+  emptyHint: { color: '#94a3b8', fontSize: 13, marginTop: 8 },
+});
