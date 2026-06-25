@@ -9,20 +9,22 @@ import {
   KeyboardAvoidingView,
   Platform,
   PanResponder,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { format, startOfWeek } from 'date-fns';
 import Svg, { Path } from 'react-native-svg';
-import { RootStackParamList, DrawingPath, Point, CalendarEvent } from '../types';
-import { COLORS, PEN_COLORS, PEN_SIZES } from '../utils/constants';
+import { RootStackParamList, DrawingPath, DrawingSticker, Point, CalendarEvent } from '../types';
+import { COLORS, PEN_COLORS, PEN_COLORS_LIGHT, PEN_SIZES } from '../utils/constants';
 import { getDayData, getHoursOfDay, getPrevDate, getNextDate } from '../utils/dateUtils';
 import CalendarHeader from '../components/CalendarHeader';
 import NavigationButton from '../components/NavigationButton';
 import { 
-  getDayDrawings, 
-  saveDayDrawings,
+  getDayStickers,
+  saveDayStickers,
   getCustomEvents,
   saveCustomEvent,
   deleteCustomEvent,
@@ -34,115 +36,199 @@ type Props = {
   route: RouteProp<RootStackParamList, 'DailyView'>;
 };
 
-const generateId = (): string => {
-  return `path_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-};
+const generateId = (): string => `sticker_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
+// ─── Mini Canvas Component (for drawing inside modal) ───
+function MiniCanvas({ onSave, onCancel }: { onSave: (paths: DrawingPath[]) => void; onCancel: () => void }) {
+  const [paths, setPaths] = useState<DrawingPath[]>([]);
+  const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
+  const [color, setColor] = useState(PEN_COLORS[0]);
+  const [size, setSize] = useState(PEN_SIZES[1]);
+  const pathsRef = useRef<DrawingPath[]>([]);
+  const currentRef = useRef<Point[]>([]);
+  const colorRef = useRef(color);
+  const sizeRef = useRef(size);
+
+  useEffect(() => { colorRef.current = color; }, [color]);
+  useEffect(() => { sizeRef.current = size; }, [size]);
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (evt) => {
+      currentRef.current = [{ x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY }];
+      setCurrentPoints([...currentRef.current]);
+    },
+    onPanResponderMove: (evt) => {
+      const last = currentRef.current[currentRef.current.length - 1];
+      if (last) {
+        const dx = evt.nativeEvent.locationX - last.x, dy = evt.nativeEvent.locationY - last.y;
+        if (dx * dx + dy * dy < 2) return;
+      }
+      currentRef.current = [...currentRef.current, { x: evt.nativeEvent.locationX, y: evt.nativeEvent.locationY }];
+      setCurrentPoints([...currentRef.current]);
+    },
+    onPanResponderRelease: () => {
+      if (currentRef.current.length > 0) {
+        const newPath: DrawingPath = { id: `p_${Date.now()}`, points: [...currentRef.current], color: colorRef.current, strokeWidth: sizeRef.current };
+        pathsRef.current = [...pathsRef.current, newPath];
+        setPaths([...pathsRef.current]);
+      }
+      currentRef.current = []; setCurrentPoints([]);
+    },
+  })).current;
+
+  const ptsToPath = (pts: Point[]): string => {
+    if (!pts.length) return '';
+    if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y} L ${pts[0].x + 0.5} ${pts[0].y + 0.5}`;
+    return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  };
+
+  return (
+    <View className="flex-1 bg-background/95">
+      {/* Top bar */}
+      <View className="flex-row justify-between items-center px-4 py-3 bg-primary border-b border-card-border">
+        <Text className="text-text-primary text-lg font-bold">✏️ Tegn</Text>
+        <View className="flex-row gap-3">
+          <TouchableOpacity className="bg-card px-4 py-2 rounded-lg border border-card-border" onPress={() => { pathsRef.current = []; setPaths([]); }}>
+            <Text className="text-text-secondary">Tøm</Text>
+          </TouchableOpacity>
+          <TouchableOpacity className="bg-accent px-4 py-2 rounded-lg" onPress={onCancel}>
+            <Text className="text-text-primary font-semibold">Avbryt</Text>
+          </TouchableOpacity>
+          <TouchableOpacity className="bg-highlight px-4 py-2 rounded-lg" onPress={() => onSave(paths)}>
+            <Text className="text-white font-bold">✔ Lagre</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Toolbar */}
+      <View className="flex-row items-center gap-2 px-3 py-2 bg-secondary">
+        <Text className="text-text-secondary text-xs font-bold">Farge:</Text>
+        {PEN_COLORS.map((c) => (
+          <TouchableOpacity key={c} className="w-6 h-6 rounded-full border-2" style={{ backgroundColor: c, borderColor: color === c ? '#fff' : 'transparent' }} onPress={() => setColor(c)} />
+        ))}
+        <View className="w-px h-6 bg-card-border mx-1" />
+        <Text className="text-text-secondary text-xs font-bold">Str:</Text>
+        {PEN_SIZES.map((s) => (
+          <TouchableOpacity key={s} className={`w-[30px] h-[30px] rounded-full bg-card items-center justify-center border-2 ${size === s ? 'border-highlight' : 'border-transparent'}`} onPress={() => setSize(s)}>
+            <View className="rounded-full bg-text-primary" style={{ width: s * 2, height: s * 2 }} />
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Canvas */}
+      <View className="flex-1 m-3 bg-canvas-bg rounded-xl overflow-hidden border border-card-border" {...pan.panHandlers} collapsable={false}>
+        <Svg width="100%" height="100%" pointerEvents="none">
+          {paths.map((p) => <Path key={p.id} d={ptsToPath(p.points)} stroke={p.color} strokeWidth={p.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" />)}
+          {currentPoints.length > 0 && <Path d={ptsToPath(currentPoints)} stroke={color} strokeWidth={size} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
+        </Svg>
+      </View>
+    </View>
+  );
+}
+
+// ─── Sticker Component (draggable on schedule) ───
+function DrawingStickerView({ sticker, onUpdate, onDelete }: { sticker: DrawingSticker; onUpdate: (s: DrawingSticker) => void; onDelete: () => void }) {
+  const [pos, setPos] = useState({ x: sticker.positionX, y: sticker.positionY });
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (evt) => {
+      dragStart.current = { x: pos.x - evt.nativeEvent.pageX, y: pos.y - evt.nativeEvent.pageY };
+    },
+    onPanResponderMove: (evt) => {
+      const newX = Math.max(0, Math.min(SCREEN_WIDTH - 150, dragStart.current.x + evt.nativeEvent.pageX));
+      const newY = Math.max(0, dragStart.current.y + evt.nativeEvent.pageY);
+      setPos({ x: newX, y: newY });
+    },
+    onPanResponderRelease: () => {
+      onUpdate({ ...sticker, positionX: pos.x, positionY: pos.y });
+    },
+  })).current;
+
+  const ptsToPath = (pts: Point[]): string => {
+    if (!pts.length) return '';
+    return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  };
+
+  return (
+    <View
+      style={{ position: 'absolute', left: pos.x, top: pos.y, width: 150, height: 150, zIndex: 50 }}
+      {...pan.panHandlers}
+    >
+      <View className="flex-1 bg-canvas-bg rounded-xl border-2 border-highlight overflow-hidden shadow-lg">
+        <TouchableOpacity className="absolute top-1 right-1 z-10 w-6 h-6 bg-error/80 rounded-full items-center justify-center" onPress={onDelete}>
+          <Text className="text-white text-xs font-bold">✕</Text>
+        </TouchableOpacity>
+        <Svg width="100%" height="100%" pointerEvents="none">
+          {sticker.drawings.map((p) => <Path key={p.id} d={ptsToPath(p.points)} stroke={p.color} strokeWidth={p.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" />)}
+        </Svg>
+      </View>
+    </View>
+  );
+}
+
+// ─── Main Screen ───
 export default function DailyViewScreen({ navigation, route }: Props) {
   const { date } = route.params;
   const dayData = getDayData(date);
   const hours = getHoursOfDay();
 
-  const [isDrawMode, setIsDrawMode] = useState(false);
-  const [drawings, setDrawings] = useState<DrawingPath[]>([]);
-  const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
-  const [selectedColor, setSelectedColor] = useState(PEN_COLORS[0]);
-  const [selectedSize, setSelectedSize] = useState(PEN_SIZES[1]);
-  const [isEraser, setIsEraser] = useState(false);
-  const [showToolbar, setShowToolbar] = useState(false);
+  const [stickers, setStickers] = useState<DrawingSticker[]>([]);
+  const [showModal, setShowModal] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [customEvents, setCustomEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddText, setQuickAddText] = useState('');
 
-  const drawingsRef = useRef<DrawingPath[]>([]);
-  const currentPointsRef = useRef<Point[]>([]);
-  const colorRef = useRef(selectedColor);
-  const sizeRef = useRef(selectedSize);
-  const eraserRef = useRef(isEraser);
-  const saveTimeoutRef = useRef<any>(null);
-  const isInitialLoad = useRef(true);
-  const scrollRef = useRef<ScrollView>(null);
-
-  useEffect(() => { colorRef.current = selectedColor; }, [selectedColor]);
-  useEffect(() => { sizeRef.current = selectedSize; }, [selectedSize]);
-  useEffect(() => { eraserRef.current = isEraser; }, [isEraser]);
-
-  useEffect(() => {
-    loadData();
-    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [date]);
+  useEffect(() => { loadData(); }, [date]);
 
   const loadData = async () => {
     setLoading(true);
-    isInitialLoad.current = true;
-    try { const saved = await getDayDrawings(date); drawingsRef.current = saved || []; setDrawings(saved || []); } catch {}
-    try { setCalendarEvents(await getEventsForDate(date)); } catch {}
-    try { setCustomEvents(await getCustomEvents(date)); } catch {}
+    try { setStickers(await getDayStickers(date) || []); } catch { setStickers([]); }
+    try { setCalendarEvents(await getEventsForDate(date)); } catch { setCalendarEvents([]); }
+    try { setCustomEvents(await getCustomEvents(date) || []); } catch { setCustomEvents([]); }
     setLoading(false);
-    setTimeout(() => { isInitialLoad.current = false; }, 500);
   };
 
-  const persistDrawings = useCallback(async (newDrawings: DrawingPath[]) => {
-    if (isInitialLoad.current || !date) return;
-    drawingsRef.current = newDrawings;
-    setDrawings(newDrawings);
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(async () => { try { await saveDayDrawings(date, newDrawings); } catch {} }, 500);
-  }, [date]);
-
-  const panResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => isDrawMode,
-    onMoveShouldSetPanResponder: () => isDrawMode,
-    onStartShouldSetPanResponderCapture: () => isDrawMode,
-    onMoveShouldSetPanResponderCapture: () => isDrawMode,
-    onPanResponderTerminationRequest: () => false,
-    onPanResponderGrant: (evt) => {
-      const x = evt.nativeEvent.locationX, y = evt.nativeEvent.locationY;
-      if (eraserRef.current) {
-        const filtered = drawingsRef.current.filter((p) => !p.points.some((pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25));
-        if (filtered.length !== drawingsRef.current.length) persistDrawings(filtered);
-      } else { currentPointsRef.current = [{ x, y }]; setCurrentPoints([{ x, y }]); }
-    },
-    onPanResponderMove: (evt) => {
-      const x = evt.nativeEvent.locationX, y = evt.nativeEvent.locationY;
-      if (eraserRef.current) {
-        const filtered = drawingsRef.current.filter((p) => !p.points.some((pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25));
-        if (filtered.length !== drawingsRef.current.length) persistDrawings(filtered);
-        return;
-      }
-      const last = currentPointsRef.current[currentPointsRef.current.length - 1];
-      if (last) { const dx = x - last.x, dy = y - last.y; if (dx * dx + dy * dy < 2) return; }
-      currentPointsRef.current = [...currentPointsRef.current, { x, y }];
-      setCurrentPoints([...currentPointsRef.current]);
-    },
-    onPanResponderRelease: () => {
-      if (eraserRef.current) return;
-      if (currentPointsRef.current.length > 0) {
-        persistDrawings([...drawingsRef.current, { id: generateId(), points: [...currentPointsRef.current], color: colorRef.current, strokeWidth: sizeRef.current }]);
-      }
-      currentPointsRef.current = []; setCurrentPoints([]);
-    },
-    onPanResponderTerminate: () => {
-      if (currentPointsRef.current.length > 0 && !eraserRef.current) {
-        persistDrawings([...drawingsRef.current, { id: generateId(), points: [...currentPointsRef.current], color: colorRef.current, strokeWidth: sizeRef.current }]);
-      }
-      currentPointsRef.current = []; setCurrentPoints([]);
-    },
-  })).current;
-
-  const pointsToPath = (points: Point[]): string => {
-    if (!points || points.length === 0) return '';
-    if (points.length === 1) return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.5} ${points[0].y + 0.5}`;
-    let d = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length; i++) d += ` L ${points[i].x} ${points[i].y}`;
-    return d;
+  const persistStickers = async (newStickers: DrawingSticker[]) => {
+    setStickers(newStickers);
+    try { await saveDayStickers(date, newStickers); } catch {}
   };
 
-  const clearDrawings = () => persistDrawings([]);
-  const undoLast = () => persistDrawings(drawingsRef.current.slice(0, -1));
+  const handleSaveSticker = async (drawingPaths: DrawingPath[]) => {
+    if (drawingPaths.length === 0) { setShowModal(false); return; }
+    const newSticker: DrawingSticker = {
+      id: generateId(),
+      drawings: drawingPaths,
+      positionX: 16,
+      positionY: 0,
+      width: 150,
+      height: 150,
+      createdAt: new Date().toISOString(),
+    };
+    await persistStickers([...stickers, newSticker]);
+    setShowModal(false);
+  };
 
+  const handleUpdateSticker = async (updated: DrawingSticker) => {
+    await persistStickers(stickers.map((s) => s.id === updated.id ? updated : s));
+  };
+
+  const handleDeleteSticker = (id: string) => {
+    Alert.alert('Slett', 'Slett denne tegningen?', [
+      { text: 'Avbryt', style: 'cancel' },
+      { text: 'Slett', style: 'destructive', onPress: () => persistStickers(stickers.filter((s) => s.id !== id)) },
+    ]);
+  };
+
+  // Quick add event
   const parseEventText = (text: string): { time: string | null; title: string; allDay: boolean } => {
     const trimmed = text.trim();
     const allDayMatch = trimmed.match(/^(all\s*day|allday)\s*[-:]?\s*(.+)/i);
@@ -157,9 +243,9 @@ export default function DailyViewScreen({ navigation, route }: Props) {
 
   const handleQuickAdd = async () => {
     const text = quickAddText.trim();
-    if (!text) { Alert.alert('Empty', 'Please enter an event description.'); return; }
+    if (!text) { Alert.alert('Tomt felt', 'Skriv en beskrivelse av hendelsen.'); return; }
     const parsed = parseEventText(text);
-    if (!parsed.title) { Alert.alert('Missing', 'Add a title after the time.'); return; }
+    if (!parsed.title) { Alert.alert('Mangler tittel', 'Legg til en tittel etter tidspunktet.'); return; }
     const eventDate = new Date(date + 'T00:00:00');
     let startDate: Date, endDate: Date;
     if (parsed.allDay) {
@@ -174,10 +260,10 @@ export default function DailyViewScreen({ navigation, route }: Props) {
     } catch {}
   };
 
-  const handleDeleteCustomEvent = (eventId: string, title: string) => {
-    Alert.alert('Delete', `Delete "${title}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => { await deleteCustomEvent(date, eventId); setCustomEvents(await getCustomEvents(date) || []); }},
+  const deleteCustomEvt = (eventId: string, title: string) => {
+    Alert.alert('Slett', `Slett "${title}"?`, [
+      { text: 'Avbryt', style: 'cancel' },
+      { text: 'Slett', style: 'destructive', onPress: async () => { await deleteCustomEvent(date, eventId); setCustomEvents(await getCustomEvents(date) || []); }},
     ]);
   };
 
@@ -206,140 +292,123 @@ export default function DailyViewScreen({ navigation, route }: Props) {
       {/* Day nav */}
       <View className="flex-row justify-between items-center px-3 py-2.5 bg-primary">
         <TouchableOpacity className="p-2" onPress={() => navigation.replace('DailyView', { date: getPrevDate(date) })}>
-          <Text className="text-accent text-sm font-semibold">← Prev</Text>
+          <Text className="text-accent text-sm font-semibold">← Forrige</Text>
         </TouchableOpacity>
         <View className="items-center">
           <Text className={`text-xl font-extrabold ${dayData.isToday ? 'text-highlight' : 'text-text-primary'}`}>{dayData.dayName}</Text>
           <Text className="text-text-secondary text-sm mt-0.5">{dayData.monthName} {dayData.dayOfMonth}, {dayData.year}</Text>
-          {dayData.isToday && <View className="bg-accent rounded px-2 py-0.5 mt-1"><Text className="text-highlight text-xs font-extrabold">TODAY</Text></View>}
+          {dayData.isToday && <View className="bg-accent rounded px-2 py-0.5 mt-1"><Text className="text-highlight text-xs font-extrabold">I DAG</Text></View>}
         </View>
         <TouchableOpacity className="p-2" onPress={() => navigation.replace('DailyView', { date: getNextDate(date) })}>
-          <Text className="text-accent text-sm font-semibold">Next →</Text>
+          <Text className="text-accent text-sm font-semibold">Neste →</Text>
         </TouchableOpacity>
       </View>
 
       {/* Quick actions */}
       <View className="flex-row justify-center gap-2.5 py-2 px-3 bg-primary border-b border-card-border">
-        <NavigationButton title="✅ To-Do" variant="small" onPress={() => navigation.navigate('TodoList')} />
-        <NavigationButton title="📝 Notes" variant="small" onPress={() => navigation.navigate('NotesJournal')} />
-        <NavigationButton title="📅 Calendar" variant="small" onPress={openExternalCalendar} />
+        <NavigationButton title="✅ Gjøremål" variant="small" onPress={() => navigation.navigate('TodoList')} />
+        <NavigationButton title="📝 Notater" variant="small" onPress={() => navigation.navigate('NotesJournal')} />
+        <NavigationButton title="📅 Kalender" variant="small" onPress={openExternalCalendar} />
       </View>
 
-      {/* Quick add */}
-      <View className="px-3 pt-2 pb-1">
-        {!showQuickAdd ? (
-          <TouchableOpacity className="bg-highlight p-3 rounded-xl items-center" onPress={() => setShowQuickAdd(true)} activeOpacity={0.7}>
-            <Text className="text-white text-sm font-bold">➕ Add Event</Text>
-          </TouchableOpacity>
-        ) : (
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={120}>
-            <View className="bg-card p-3.5 rounded-xl border-2 border-highlight">
-              <View className="flex-row justify-between items-center mb-1.5">
-                <Text className="text-highlight text-base font-bold">➕ Quick Add Event</Text>
-                <TouchableOpacity onPress={() => { setQuickAddText(''); setShowQuickAdd(false); }}>
-                  <Text className="text-text-secondary text-lg font-bold p-1">✕</Text>
-                </TouchableOpacity>
-              </View>
-              <Text className="text-text-secondary text-xs mb-2">e.g. "9:00 Meeting" or "All day - Vacation"</Text>
-              <TextInput
-                className="bg-background rounded-lg p-3 text-text-primary text-base mb-2.5 border border-card-border"
-                value={quickAddText} onChangeText={setQuickAddText}
-                placeholder="Type time + event..." placeholderTextColor={COLORS.textSecondary}
-                autoFocus returnKeyType="done" onSubmitEditing={handleQuickAdd}
-              />
-              <TouchableOpacity className="bg-success rounded-lg py-3 items-center" onPress={handleQuickAdd} activeOpacity={0.7}>
-                <Text className="text-white font-bold text-sm">✓ Add</Text>
+      {/* Quick add row + drawing button */}
+      <View className="flex-row px-3 pt-2 pb-1 gap-2">
+        <TouchableOpacity className="flex-1 bg-highlight p-3 rounded-xl items-center" onPress={() => setShowQuickAdd(true)} activeOpacity={0.7}>
+          <Text className="text-white text-sm font-bold">➕ Legg til hendelse</Text>
+        </TouchableOpacity>
+        <TouchableOpacity className="bg-accent p-3 rounded-xl items-center justify-center" onPress={() => setShowModal(true)} activeOpacity={0.7}>
+          <Text className="text-white text-lg">✏️</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Quick add form */}
+      {showQuickAdd && (
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={120}>
+          <View className="mx-3 mb-2 bg-card p-3.5 rounded-xl border-2 border-highlight">
+            <View className="flex-row justify-between items-center mb-1.5">
+              <Text className="text-highlight text-base font-bold">➕ Ny hendelse</Text>
+              <TouchableOpacity onPress={() => { setQuickAddText(''); setShowQuickAdd(false); }}>
+                <Text className="text-text-secondary text-lg font-bold p-1">✕</Text>
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
-        )}
-      </View>
-
-      {/* Main content */}
-      <View className="flex-1 relative">
-        <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 12, paddingBottom: 80 }} scrollEnabled={!isDrawMode} showsVerticalScrollIndicator={!isDrawMode} nestedScrollEnabled>
-          {allDayEvents.map((e) => (
-            <View key={e.id} className={`bg-card p-2.5 rounded-lg mb-2 flex-row items-center gap-2 border-l-4 ${isCustomEvent(e) ? 'border-highlight border' : ''}`} style={{ borderLeftColor: e.color ?? COLORS.accent }}>
-              <Text className="text-highlight text-xs font-extrabold bg-accent px-1.5 py-0.5 rounded overflow-hidden">ALL DAY</Text>
-              <Text className="text-text-primary text-sm font-semibold flex-1">{e.title}</Text>
-              {isCustomEvent(e) && <TouchableOpacity onPress={() => handleDeleteCustomEvent(e.id, e.title)}><Text className="text-base p-1">🗑️</Text></TouchableOpacity>}
-            </View>
-          ))}
-          {hours.map((hour) => {
-            const evts = eventsAtHour(hour);
-            return (
-              <View key={hour} className="flex-row min-h-[44px] border-b border-card-border">
-                <View className="w-14 pt-2 pr-2 items-end"><Text className="text-text-secondary text-xs">{hour}</Text></View>
-                <View className="flex-1 py-1 pl-2 border-l border-card-border">
-                  {evts.map((e) => (
-                    <View key={e.id} className={`bg-card p-2.5 rounded-md mb-1 flex-row items-center border-l-[3px] ${isCustomEvent(e) ? 'border-highlight border' : ''}`} style={{ borderLeftColor: e.color ?? COLORS.accent }}>
-                      <View className="flex-1">
-                        <Text className="text-text-secondary text-xs font-semibold">{format(new Date(e.startDate), 'HH:mm')} - {format(new Date(e.endDate), 'HH:mm')}</Text>
-                        <Text className="text-text-primary text-sm font-semibold mt-0.5">{e.title}</Text>
-                        {isCustomEvent(e) ? <Text className="text-highlight text-xs font-bold mt-0.5">📝 Custom</Text> : <Text className="text-text-secondary text-[10px] uppercase mt-0.5">{e.calendarSource}</Text>}
-                      </View>
-                      {isCustomEvent(e) && <TouchableOpacity onPress={() => handleDeleteCustomEvent(e.id, e.title)}><Text className="text-base p-1">🗑️</Text></TouchableOpacity>}
-                    </View>
-                  ))}
-                </View>
-              </View>
-            );
-          })}
-          {allEvents.length === 0 && !loading && (
-            <View className="items-center py-16"><Text className="text-5xl mb-3.5">📅</Text><Text className="text-text-primary text-base font-semibold">No events today</Text><Text className="text-text-secondary text-sm mt-2">Tap "➕ Add Event" above to add one</Text></View>
-          )}
-        </ScrollView>
-
-        {/* Drawing overlay */}
-        {isDrawMode && (
-          <View className="absolute inset-0" {...panResponder.panHandlers} collapsable={false}>
-            <Svg width="100%" height="100%" className="absolute inset-0" pointerEvents="none">
-              {drawings.map((path) => (<Path key={path.id} d={pointsToPath(path.points)} stroke={path.color} strokeWidth={path.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" />))}
-              {currentPoints.length > 0 && (<Path d={pointsToPath(currentPoints)} stroke={selectedColor} strokeWidth={selectedSize} fill="none" strokeLinecap="round" strokeLinejoin="round" />)}
-            </Svg>
+            <Text className="text-text-secondary text-xs mb-2">F.eks. "9:00 Møte" eller "Hel dag - Ferie"</Text>
+            <TextInput
+              className="bg-background rounded-lg p-3 text-text-primary text-base mb-2.5 border border-card-border"
+              value={quickAddText} onChangeText={setQuickAddText}
+              placeholder="Skriv tid + hendelse..." placeholderTextColor={COLORS.textSecondary}
+              autoFocus returnKeyType="done" onSubmitEditing={handleQuickAdd}
+            />
+            <TouchableOpacity className="bg-success rounded-lg py-3 items-center" onPress={handleQuickAdd} activeOpacity={0.7}>
+              <Text className="text-white font-bold text-sm">✓ Legg til</Text>
+            </TouchableOpacity>
           </View>
-        )}
-        {!isDrawMode && drawings.length > 0 && (
-          <Svg width="100%" height="100%" className="absolute inset-0" pointerEvents="none">
-            {drawings.map((path) => (<Path key={path.id} d={pointsToPath(path.points)} stroke={path.color} strokeWidth={path.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />))}
-          </Svg>
-        )}
-      </View>
-
-      {/* Drawing toolbar */}
-      {isDrawMode && showToolbar && (
-        <View className="bg-secondary border-t border-card-border p-2.5">
-          <View className="flex-row items-center gap-1.5 mb-1.5">
-            <Text className="text-text-secondary text-xs font-bold w-10">Color:</Text>
-            {PEN_COLORS.map((color) => (<TouchableOpacity key={color} className="w-7 h-7 rounded-full border-2 border-transparent" style={{ backgroundColor: color, ...(selectedColor === color && !isEraser ? { borderColor: '#ffffff', transform: [{ scale: 1.2 }] } : {}) }} onPress={() => { setSelectedColor(color); setIsEraser(false); }} />))}
-          </View>
-          <View className="flex-row items-center gap-1.5">
-            <Text className="text-text-secondary text-xs font-bold w-10">Size:</Text>
-            {PEN_SIZES.map((size) => (<TouchableOpacity key={size} className={`w-[34px] h-[34px] rounded-full bg-card items-center justify-center border-2 ${selectedSize === size ? 'border-highlight' : 'border-transparent'}`} onPress={() => setSelectedSize(size)}><View className="rounded-full bg-text-primary" style={{ width: size * 2.5, height: size * 2.5 }} /></TouchableOpacity>))}
-            <View className="flex-row gap-1.5 ml-auto">
-              <TouchableOpacity className={`px-2.5 py-1.5 bg-card rounded-lg border border-card-border ${isEraser ? 'border-highlight bg-accent' : ''}`} onPress={() => setIsEraser(!isEraser)}><Text className="text-base">🧹</Text></TouchableOpacity>
-              <TouchableOpacity className="px-2.5 py-1.5 bg-card rounded-lg border border-card-border" onPress={undoLast}><Text className="text-base">↩️</Text></TouchableOpacity>
-              <TouchableOpacity className="px-2.5 py-1.5 bg-card rounded-lg border border-card-border" onPress={clearDrawings}><Text className="text-base">🗑️</Text></TouchableOpacity>
-            </View>
-          </View>
-        </View>
+        </KeyboardAvoidingView>
       )}
 
-      {/* Floating draw toggle */}
-      <TouchableOpacity
-        className={`absolute bottom-5 right-4 w-[52px] h-[52px] rounded-full items-center justify-center shadow-lg ${isDrawMode ? 'bg-success' : 'bg-accent'}`}
-        onPress={() => { setIsDrawMode(!isDrawMode); if (!isDrawMode) setShowToolbar(true); }}
-        activeOpacity={0.85}
+      {/* Main scrollable schedule */}
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 12, paddingBottom: 100 }}
+        nestedScrollEnabled
       >
-        <Text className="text-xl text-white font-bold">{isDrawMode ? '✕ Done' : '✏️'}</Text>
-      </TouchableOpacity>
+        {/* All day events */}
+        {allDayEvents.map((e) => (
+          <View key={e.id} className="bg-card p-2.5 rounded-lg mb-2 flex-row items-center gap-2 border-l-4" style={{ borderLeftColor: e.color ?? COLORS.accent }}>
+            <Text className="text-highlight text-xs font-extrabold bg-accent px-1.5 py-0.5 rounded">HEL DAG</Text>
+            <Text className="text-text-primary text-sm font-semibold flex-1">{e.title}</Text>
+            {isCustomEvent(e) && <TouchableOpacity onPress={() => deleteCustomEvt(e.id, e.title)}><Text className="text-base p-1">🗑️</Text></TouchableOpacity>}
+          </View>
+        ))}
 
-      {/* Draw mode indicator */}
-      {isDrawMode && (
-        <View className="absolute top-0 left-0 right-0 bg-highlight/90 py-1.5 items-center">
-          <Text className="text-white text-xs font-semibold">✏️ Draw mode — scroll disabled. Tap ✓ when done.</Text>
-        </View>
-      )}
+        {/* Hourly schedule */}
+        {hours.map((hour) => {
+          const evts = eventsAtHour(hour);
+          return (
+            <View key={hour} className="flex-row min-h-[44px] border-b border-card-border">
+              <View className="w-14 pt-2 pr-2 items-end"><Text className="text-text-secondary text-xs">{hour}</Text></View>
+              <View className="flex-1 py-1 pl-2 border-l border-card-border">
+                {evts.map((e) => (
+                  <View key={e.id} className="bg-card p-2.5 rounded-md mb-1 flex-row items-center border-l-[3px]" style={{ borderLeftColor: e.color ?? COLORS.accent }}>
+                    <View className="flex-1">
+                      <Text className="text-text-secondary text-xs font-semibold">{format(new Date(e.startDate), 'HH:mm')} - {format(new Date(e.endDate), 'HH:mm')}</Text>
+                      <Text className="text-text-primary text-sm font-semibold mt-0.5">{e.title}</Text>
+                      {isCustomEvent(e) ? <Text className="text-highlight text-xs font-bold mt-0.5">📝 Lokal</Text> : <Text className="text-text-secondary text-[10px] uppercase mt-0.5">{e.calendarSource}</Text>}
+                    </View>
+                    {isCustomEvent(e) && <TouchableOpacity onPress={() => deleteCustomEvt(e.id, e.title)}><Text className="text-base p-1">🗑️</Text></TouchableOpacity>}
+                  </View>
+                ))}
+              </View>
+            </View>
+          );
+        })}
+
+        {allEvents.length === 0 && !loading && (
+          <View className="items-center py-16">
+            <Text className="text-5xl mb-3.5">📅</Text>
+            <Text className="text-text-primary text-base font-semibold">Ingen hendelser i dag</Text>
+            <Text className="text-text-secondary text-sm mt-2">Trykk "Legg til hendelse" for å legge til noe</Text>
+          </View>
+        )}
+
+        {/* Drawing stickers pinned inside the scroll */}
+        {stickers.map((sticker) => (
+          <View key={sticker.id} className="mb-3" style={{ zIndex: 50 }}>
+            <DrawingStickerView sticker={sticker} onUpdate={handleUpdateSticker} onDelete={() => handleDeleteSticker(sticker.id)} />
+          </View>
+        ))}
+
+        {/* Sticker counter */}
+        {stickers.length > 0 && (
+          <View className="items-center mt-4 mb-2">
+            <Text className="text-text-secondary text-xs">{stickers.length} tegning{stickers.length > 1 ? 'er' : ''} — dra for å flytte</Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Drawing Modal */}
+      <Modal visible={showModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowModal(false)}>
+        <MiniCanvas onSave={handleSaveSticker} onCancel={() => setShowModal(false)} />
+      </Modal>
     </SafeAreaView>
   );
 }

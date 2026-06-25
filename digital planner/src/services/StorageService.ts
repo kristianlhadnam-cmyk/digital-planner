@@ -5,6 +5,7 @@ import {
   TodoItem,
   NoteEntry,
   DrawingPath,
+  DrawingSticker,
   CalendarEvent,
 } from '../types';
 import { STORAGE_KEYS } from '../utils/constants';
@@ -62,6 +63,38 @@ export const saveDayDrawings = async (
     }
   } catch (error) {
     console.error('Error saving day drawings:', error);
+  }
+};
+
+// ─────────────────────────────────────────
+// DRAWING STICKERS
+// ─────────────────────────────────────────
+
+const STICKERS_KEY = 'planner_stickers_';
+
+export const getDayStickers = async (
+  dateString: string
+): Promise<DrawingSticker[]> => {
+  try {
+    const data = await AsyncStorage.getItem(`${STICKERS_KEY}${dateString}`);
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error('Error getting day stickers:', error);
+    return [];
+  }
+};
+
+export const saveDayStickers = async (
+  dateString: string,
+  stickers: DrawingSticker[]
+): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(
+      `${STICKERS_KEY}${dateString}`,
+      JSON.stringify(stickers)
+    );
+  } catch (error) {
+    console.error('Error saving day stickers:', error);
   }
 };
 

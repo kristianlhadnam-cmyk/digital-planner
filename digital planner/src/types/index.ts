@@ -10,6 +10,16 @@ export interface Point {
   y: number;
 }
 
+export interface DrawingSticker {
+  id: string;
+  drawings: DrawingPath[];
+  positionX: number;
+  positionY: number;
+  width: number;
+  height: number;
+  createdAt: string;
+}
+
 export interface PdfAnnotation {
   pageNumber: number;
   drawings: DrawingPath[];
@@ -17,7 +27,7 @@ export interface PdfAnnotation {
 
 export interface DaySchedule {
   date: string;
-  drawings: DrawingPath[];
+  stickers: DrawingSticker[];
   events: CalendarEvent[];
   notes: string;
 }

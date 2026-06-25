@@ -1,29 +1,57 @@
-// FILE: digital-planner/src/utils/constants.ts
-
 export const COLORS = {
-  primary: '#1a1a2e',
-  secondary: '#16213e',
-  accent: '#0f3460',
-  highlight: '#e94560',
-  text: '#eaeaea',
-  textSecondary: '#a0a0b0',
-  background: '#0f0f23',
-  cardBg: '#1a1a2e',
-  cardBorder: '#2a2a4a',
+  primary: '#1e293b',
+  secondary: '#0f172a',
+  accent: '#2563eb',
+  highlight: '#3b82f6',
+  text: '#f1f5f9',
+  textSecondary: '#94a3b8',
+  background: '#0b1120',
+  cardBg: '#1e293b',
+  cardBorder: '#334155',
   white: '#ffffff',
-  success: '#4ecca3',
-  warning: '#ffc107',
-  error: '#e94560',
-  todayBg: '#0f3460',
-  weekendBg: '#12122a',
-  canvasBg: '#fffef9',
-  canvasLine: '#d4d4e8',
-  drawingBlack: '#1a1a1a',
-  drawingBlue: '#2563eb',
-  drawingRed: '#dc2626',
-  drawingGreen: '#16a34a',
-  drawingPurple: '#7c3aed',
+  success: '#22c55e',
+  warning: '#f59e0b',
+  error: '#ef4444',
+  todayBg: '#1e3a5f',
+  weekendBg: '#0f1729',
+  canvasBg: '#f8fafc',
+  canvasLine: '#cbd5e1',
 };
+
+export const PEN_COLORS = [
+  '#1e293b',
+  '#2563eb',
+  '#ef4444',
+  '#22c55e',
+  '#8b5cf6',
+  '#f97316',
+  '#ffffff',
+  '#facc15',
+];
+
+export const PEN_COLORS_LIGHT = [
+  '#1e293b',
+  '#2563eb',
+  '#ef4444',
+  '#22c55e',
+  '#8b5cf6',
+  '#f97316',
+  '#ffffff',
+  '#facc15',
+];
+
+export const PEN_COLORS_DARK = [
+  '#ffffff',
+  '#60a5fa',
+  '#f87171',
+  '#4ade80',
+  '#a78bfa',
+  '#fb923c',
+  '#1e293b',
+  '#facc15',
+];
+
+export const PEN_SIZES = [2, 4, 6, 10];
 
 export const MONTHS = [
   'January', 'February', 'March', 'April',
@@ -44,17 +72,6 @@ export const DAYS_FULL = [
   'Monday', 'Tuesday', 'Wednesday',
   'Thursday', 'Friday', 'Saturday', 'Sunday',
 ];
-
-export const PEN_COLORS = [
-  '#1a1a1a',
-  '#2563eb',
-  '#dc2626',
-  '#16a34a',
-  '#7c3aed',
-  '#ea580c',
-];
-
-export const PEN_SIZES = [2, 4, 6, 10];
 
 export const STORAGE_KEYS = {
   SCHEDULES: 'planner_schedules',
