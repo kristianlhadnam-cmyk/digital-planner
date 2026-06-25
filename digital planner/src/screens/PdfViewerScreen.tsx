@@ -38,10 +38,11 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
 
   const [annotations, setAnnotations] = useState<PdfAnnotation[]>([]);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
-  const [selectedColor, setSelectedColor] = useState(PEN_COLORS[2]);
+  const [selectedColor, setSelectedColor] = useState(PEN_COLORS[0]);
   const [selectedSize, setSelectedSize] = useState(PEN_SIZES[1]);
-  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [isDrawMode, setIsDrawMode] = useState(false);
   const [isEraser, setIsEraser] = useState(false);
+  const [showToolbar, setShowToolbar] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -55,14 +56,12 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
   const sizeRef = useRef(selectedSize);
   const eraserRef = useRef(isEraser);
   const pageRef = useRef(currentPage);
-  const drawingModeRef = useRef(isDrawingMode);
   const webViewRef = useRef<WebView>(null);
 
   useEffect(() => { colorRef.current = selectedColor; }, [selectedColor]);
   useEffect(() => { sizeRef.current = selectedSize; }, [selectedSize]);
   useEffect(() => { eraserRef.current = isEraser; }, [isEraser]);
   useEffect(() => { pageRef.current = currentPage; }, [currentPage]);
-  useEffect(() => { drawingModeRef.current = isDrawingMode; }, [isDrawingMode]);
 
   useEffect(() => {
     loadAnnotations();
@@ -127,25 +126,25 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
     saveAnnotations(updated);
   };
 
+  // Drawing PanResponder
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => drawingModeRef.current,
-      onMoveShouldSetPanResponder: () => drawingModeRef.current,
-      onStartShouldSetPanResponderCapture: () => drawingModeRef.current,
-      onMoveShouldSetPanResponderCapture: () => drawingModeRef.current,
+      onStartShouldSetPanResponder: () => isDrawMode,
+      onMoveShouldSetPanResponder: () => isDrawMode,
+      onStartShouldSetPanResponderCapture: () => isDrawMode,
+      onMoveShouldSetPanResponderCapture: () => isDrawMode,
 
       onPanResponderGrant: (evt) => {
         const x = evt.nativeEvent.locationX;
         const y = evt.nativeEvent.locationY;
+
         if (eraserRef.current) {
           const pageDrawings = annotationsRef.current.find(
             a => a.pageNumber === pageRef.current
           )?.drawings || [];
-          const filtered = pageDrawings.filter((p) => {
-            return !p.points.some(
-              (pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25
-            );
-          });
+          const filtered = pageDrawings.filter((p) =>
+            !p.points.some((pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25)
+          );
           if (filtered.length !== pageDrawings.length) {
             updateCurrentPageDrawings(filtered);
           }
@@ -158,24 +157,21 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
       onPanResponderMove: (evt) => {
         const x = evt.nativeEvent.locationX;
         const y = evt.nativeEvent.locationY;
+
         if (eraserRef.current) {
           const pageDrawings = annotationsRef.current.find(
             a => a.pageNumber === pageRef.current
           )?.drawings || [];
-          const filtered = pageDrawings.filter((p) => {
-            return !p.points.some(
-              (pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25
-            );
-          });
-          if (filtered.length !== pageDrawings.length) {
-            updateCurrentPageDrawings(filtered);
-          }
+          const filtered = pageDrawings.filter((p) =>
+            !p.points.some((pt) => Math.abs(pt.x - x) < 25 && Math.abs(pt.y - y) < 25)
+          );
+          if (filtered.length !== pageDrawings.length) updateCurrentPageDrawings(filtered);
           return;
         }
+
         const lastPoint = currentPathRef.current[currentPathRef.current.length - 1];
         if (lastPoint) {
-          const dx = x - lastPoint.x;
-          const dy = y - lastPoint.y;
+          const dx = x - lastPoint.x, dy = y - lastPoint.y;
           if (dx * dx + dy * dy < 2) return;
         }
         currentPathRef.current = [...currentPathRef.current, { x, y }];
@@ -209,34 +205,22 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
 
   const pointsToPath = (points: Point[]): string => {
     if (!points || points.length === 0) return '';
-    if (points.length === 1) {
-      return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.5} ${points[0].y + 0.5}`;
-    }
+    if (points.length === 1) return `M ${points[0].x} ${points[0].y} L ${points[0].x + 0.5} ${points[0].y + 0.5}`;
     let d = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length; i++) {
-      d += ` L ${points[i].x} ${points[i].y}`;
-    }
+    for (let i = 1; i < points.length; i++) d += ` L ${points[i].x} ${points[i].y}`;
     return d;
   };
 
   const clearCurrentPage = () => {
-    Alert.alert(
-      'Clear Page',
-      `Clear annotations on page ${currentPage}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: () => updateCurrentPageDrawings([]) },
-      ]
-    );
+    Alert.alert('Clear Page', `Clear annotations on page ${currentPage}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: () => updateCurrentPageDrawings([]) },
+    ]);
   };
 
   const undoLast = () => {
-    const pageDrawings = annotationsRef.current.find(
-      a => a.pageNumber === currentPage
-    )?.drawings || [];
-    if (pageDrawings.length > 0) {
-      updateCurrentPageDrawings(pageDrawings.slice(0, -1));
-    }
+    const pageDrawings = annotationsRef.current.find(a => a.pageNumber === currentPage)?.drawings || [];
+    if (pageDrawings.length > 0) updateCurrentPageDrawings(pageDrawings.slice(0, -1));
   };
 
   const goToPage = (page: number) => {
@@ -285,9 +269,7 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
       } else if (data.type === 'zoomChanged') {
         setZoomLevel(data.zoom);
       }
-    } catch (e) {
-      console.log('Parse message error:', e);
-    }
+    } catch (e) { console.log('Parse message error:', e); }
   };
 
   const generateHtml = (base64: string): string => {
@@ -300,31 +282,10 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body, html {
-      width: 100%;
-      height: 100%;
-      background: #525252;
-      overflow: auto;
-    }
-    #pdf-container {
-      width: 100%;
-      min-height: 100%;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      padding: 10px;
-    }
-    canvas {
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-      max-width: none;
-    }
-    #loading {
-      color: white;
-      font-family: sans-serif;
-      font-size: 16px;
-      text-align: center;
-      padding-top: 50%;
-    }
+    body, html { width: 100%; height: 100%; background: #525252; overflow: auto; }
+    #pdf-container { width: 100%; min-height: 100%; display: flex; justify-content: center; align-items: flex-start; padding: 10px; }
+    canvas { box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: none; }
+    #loading { color: white; font-family: sans-serif; font-size: 16px; text-align: center; padding-top: 50%; }
   </style>
 </head>
 <body>
@@ -332,14 +293,9 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
     <div id="loading">Loading PDF...</div>
     <canvas id="pdf-canvas" style="display:none;"></canvas>
   </div>
-
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    
-    let pdfDoc = null;
-    let currentRenderPage = 1;
-    let currentZoom = 1.0;
-    let baseScale = 1.0;
+    let pdfDoc = null, currentRenderPage = 1, currentZoom = 1.0, baseScale = 1.0;
     let canvas = document.getElementById('pdf-canvas');
     let ctx = canvas.getContext('2d');
     let loadingDiv = document.getElementById('loading');
@@ -347,37 +303,24 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
     function base64ToUint8Array(base64) {
       const binaryString = atob(base64);
       const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
       return bytes;
     }
 
     function sendMessage(data) {
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify(data));
-      }
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(data));
     }
 
     async function loadPdf() {
       try {
         const pdfData = base64ToUint8Array('${base64}');
-        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
-        pdfDoc = await loadingTask.promise;
-        
-        sendMessage({
-          type: 'loaded',
-          totalPages: pdfDoc.numPages
-        });
-        
+        pdfDoc = await pdfjsLib.getDocument({ data: pdfData }).promise;
+        sendMessage({ type: 'loaded', totalPages: pdfDoc.numPages });
         loadingDiv.style.display = 'none';
         canvas.style.display = 'block';
         await fitToScreen(1);
       } catch (error) {
-        sendMessage({
-          type: 'error',
-          message: error.message || 'Failed to load PDF'
-        });
+        sendMessage({ type: 'error', message: error.message || 'Failed to load PDF' });
         loadingDiv.textContent = 'Error: ' + error.message;
       }
     }
@@ -388,59 +331,38 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
         currentRenderPage = pageNum;
         const page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale: 1 });
-        
         const containerWidth = window.innerWidth - 20;
         const containerHeight = window.innerHeight - 20;
         const scaleX = containerWidth / viewport.width;
         const scaleY = containerHeight / viewport.height;
         baseScale = Math.min(scaleX, scaleY) * 0.95;
         currentZoom = 1.0;
-        
         await renderAtScale(pageNum, baseScale);
         sendMessage({ type: 'zoomChanged', zoom: 1.0 });
-      } catch (error) {
-        sendMessage({ type: 'error', message: 'Render error: ' + error.message });
-      }
+      } catch (error) { sendMessage({ type: 'error', message: 'Render error: ' + error.message }); }
     }
 
     async function renderPage(pageNum, zoom) {
       if (!pdfDoc) return;
       try {
         if (zoom !== currentZoom || pageNum !== currentRenderPage) {
-          currentZoom = zoom;
-          currentRenderPage = pageNum;
+          currentZoom = zoom; currentRenderPage = pageNum;
         }
-        
-        const actualScale = baseScale * zoom;
-        await renderAtScale(pageNum, actualScale);
-      } catch (error) {
-        sendMessage({ type: 'error', message: 'Render error: ' + error.message });
-      }
+        await renderAtScale(pageNum, baseScale * zoom);
+      } catch (error) { sendMessage({ type: 'error', message: 'Render error: ' + error.message }); }
     }
 
     async function renderAtScale(pageNum, scale) {
       const page = await pdfDoc.getPage(pageNum);
       const viewport = page.getViewport({ scale: scale });
-      
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      
-      const renderContext = {
-        canvasContext: ctx,
-        viewport: viewport
-      };
-      
-      await page.render(renderContext).promise;
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
       sendMessage({ type: 'pageChanged', page: pageNum });
     }
 
     loadPdf();
-
-    window.addEventListener('resize', () => {
-      if (pdfDoc) {
-        fitToScreen(currentRenderPage);
-      }
-    });
+    window.addEventListener('resize', () => { if (pdfDoc) fitToScreen(currentRenderPage); });
   </script>
 </body>
 </html>
@@ -469,80 +391,41 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
     <SafeAreaView style={styles.safe}>
       <CalendarHeader onHomePress={() => navigation.navigate('Home')} title={pdfName} />
 
-      {/* Top Toolbar */}
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          style={[styles.modeBtn, !isDrawingMode && styles.modeBtnActive]}
-          onPress={() => { setIsDrawingMode(false); setIsEraser(false); }}
-        >
-          <Text style={[styles.modeBtnText, !isDrawingMode && styles.modeBtnTextActive]}>
-            👁️ View
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.modeBtn, isDrawingMode && !isEraser && styles.modeBtnActive]}
-          onPress={() => { setIsDrawingMode(true); setIsEraser(false); }}
-        >
-          <Text style={[styles.modeBtnText, isDrawingMode && !isEraser && styles.modeBtnTextActive]}>
-            ✏️ Draw
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.modeBtn, isDrawingMode && isEraser && styles.modeBtnActive]}
-          onPress={() => { setIsDrawingMode(true); setIsEraser(true); }}
-        >
-          <Text style={[styles.modeBtnText, isDrawingMode && isEraser && styles.modeBtnTextActive]}>
-            🧹 Erase
-          </Text>
-        </TouchableOpacity>
-      </View>
+      {/* Draw mode indicator */}
+      {isDrawMode && (
+        <View style={styles.drawModeIndicator}>
+          <Text style={styles.drawModeIndicatorText}>✏️ Draw on PDF — page scrolling disabled</Text>
+        </View>
+      )}
 
-      {/* ZOOM CONTROLS */}
-      <View style={styles.zoomBar}>
-        <TouchableOpacity style={styles.zoomBtn} onPress={zoomOut} disabled={zoomLevel <= ZOOM_LEVELS[0]}>
-          <Text style={[styles.zoomBtnText, zoomLevel <= ZOOM_LEVELS[0] && styles.disabled]}>
-            ➖
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.zoomLevelBtn} onPress={resetZoom}>
-          <Text style={styles.zoomLevelText}>
-            {Math.round(zoomLevel * 100)}%
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.zoomBtn} onPress={zoomIn} disabled={zoomLevel >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}>
-          <Text style={[styles.zoomBtnText, zoomLevel >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1] && styles.disabled]}>
-            ➕
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.fitBtn} onPress={fitToScreen}>
-          <Text style={styles.fitBtnText}>📐 Fit</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Drawing Tools */}
-      {isDrawingMode && !isEraser && (
-        <View style={styles.drawingTools}>
-          <Text style={styles.toolLabel}>Color:</Text>
-          {PEN_COLORS.slice(0, 5).map((color) => (
-            <TouchableOpacity
-              key={color}
-              style={[styles.colorBtn, { backgroundColor: color }, selectedColor === color && styles.colorSelected]}
-              onPress={() => setSelectedColor(color)}
-            />
-          ))}
-          <Text style={[styles.toolLabel, { marginLeft: 12 }]}>Size:</Text>
-          {PEN_SIZES.map((size) => (
-            <TouchableOpacity
-              key={size}
-              style={[styles.sizeBtn, selectedSize === size && styles.sizeSelected]}
-              onPress={() => setSelectedSize(size)}
-            >
-              <View style={[styles.sizeDot, { width: size * 2, height: size * 2 }]} />
-            </TouchableOpacity>
-          ))}
+      {/* Drawing toolbar */}
+      {isDrawMode && showToolbar && (
+        <View style={styles.drawToolbar}>
+          <View style={styles.toolRow}>
+            <Text style={styles.toolLabel}>Color:</Text>
+            {PEN_COLORS.map((color) => (
+              <TouchableOpacity key={color} style={[styles.colorBtn, { backgroundColor: color }, selectedColor === color && !isEraser && styles.colorSelected]} onPress={() => { setSelectedColor(color); setIsEraser(false); }} />
+            ))}
+          </View>
+          <View style={styles.toolRow}>
+            <Text style={styles.toolLabel}>Size:</Text>
+            {PEN_SIZES.map((size) => (
+              <TouchableOpacity key={size} style={[styles.sizeBtn, selectedSize === size && styles.sizeSelected]} onPress={() => setSelectedSize(size)}>
+                <View style={[styles.sizeDot, { width: size * 2.5, height: size * 2.5 }]} />
+              </TouchableOpacity>
+            ))}
+            <View style={styles.toolActions}>
+              <TouchableOpacity style={[styles.toolActionBtn, isEraser && styles.toolActionActive]} onPress={() => setIsEraser(!isEraser)}>
+                <Text style={styles.toolActionText}>🧹</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolActionBtn} onPress={undoLast}>
+                <Text style={styles.toolActionText}>↩️</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.toolActionBtn} onPress={clearCurrentPage}>
+                <Text style={styles.toolActionText}>🗑️</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       )}
 
@@ -561,76 +444,51 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
             source={{ html: generateHtml(pdfBase64) }}
             style={styles.webview}
             onMessage={handleWebViewMessage}
-            onError={(e) => { setError('WebView error: ' + e.nativeEvent.description); }}
+            onError={(e) => setError('WebView error: ' + e.nativeEvent.description)}
             originWhitelist={['*']}
             javaScriptEnabled={true}
             domStorageEnabled={true}
             scalesPageToFit={false}
-            scrollEnabled={!isDrawingMode}
+            scrollEnabled={!isDrawMode}
             bounces={false}
             mixedContentMode="always"
           />
         )}
 
-        {/* Drawing Overlay - Only active in draw mode */}
-        {isDrawingMode && (
+        {/* Drawing overlay */}
+        {isDrawMode && (
           <View
-            style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent' }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', zIndex: 10 }]}
             {...panResponder.panHandlers}
             pointerEvents="auto"
           >
             <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
               {currentPageDrawings.map((path) => (
-                <Path
-                  key={path.id}
-                  d={pointsToPath(path.points)}
-                  stroke={path.color}
-                  strokeWidth={path.strokeWidth}
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity={0.85}
-                />
+                <Path key={path.id} d={pointsToPath(path.points)} stroke={path.color} strokeWidth={path.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" />
               ))}
               {currentPath.length > 0 && (
-                <Path
-                  d={pointsToPath(currentPath)}
-                  stroke={selectedColor}
-                  strokeWidth={selectedSize}
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+                <Path d={pointsToPath(currentPath)} stroke={selectedColor} strokeWidth={selectedSize} fill="none" strokeLinecap="round" strokeLinejoin="round" />
               )}
             </Svg>
           </View>
         )}
 
-        {/* Show drawings in view mode (non-interactive) */}
-        {!isDrawingMode && currentPageDrawings.length > 0 && (
+        {/* Show existing drawings always */}
+        {!isDrawMode && currentPageDrawings.length > 0 && (
           <Svg
             width="100%"
             height="100%"
-            style={StyleSheet.absoluteFill}
+            style={[StyleSheet.absoluteFill, { zIndex: 5 }]}
             pointerEvents="none"
           >
             {currentPageDrawings.map((path) => (
-              <Path
-                key={path.id}
-                d={pointsToPath(path.points)}
-                stroke={path.color}
-                strokeWidth={path.strokeWidth}
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={0.85}
-              />
+              <Path key={path.id} d={pointsToPath(path.points)} stroke={path.color} strokeWidth={path.strokeWidth} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
             ))}
           </Svg>
         )}
       </View>
 
-      {/* Page Navigation */}
+      {/* Page Navigation + Zoom */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={[styles.pageBtn, currentPage <= 1 && styles.pageBtnDisabled]}
@@ -639,12 +497,20 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
         >
           <Text style={styles.pageBtnText}>← Prev</Text>
         </TouchableOpacity>
-        <View style={styles.pageInfo}>
-          <Text style={styles.pageInfoText}>Page {currentPage} of {totalPages}</Text>
-          {currentPageDrawings.length > 0 && (
-            <Text style={styles.annotationCount}>✏️ {currentPageDrawings.length} strokes</Text>
-          )}
+
+        <View style={styles.zoomCenter}>
+          <TouchableOpacity style={styles.zoomBtn} onPress={zoomOut} disabled={zoomLevel <= ZOOM_LEVELS[0]}>
+            <Text style={[styles.zoomBtnText, zoomLevel <= ZOOM_LEVELS[0] && styles.disabled]}>➖</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.zoomLevelBtn} onPress={resetZoom}>
+            <Text style={styles.zoomLevelText}>{Math.round(zoomLevel * 100)}%</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.zoomBtn} onPress={zoomIn} disabled={zoomLevel >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}>
+            <Text style={[styles.zoomBtnText, zoomLevel >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1] && styles.disabled]}>➕</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.fitBtn} onPress={fitToScreen}><Text style={styles.fitBtnText}>📐</Text></TouchableOpacity>
         </View>
+
         <TouchableOpacity
           style={[styles.pageBtn, currentPage >= totalPages && styles.pageBtnDisabled]}
           onPress={() => goToPage(currentPage + 1)}
@@ -654,17 +520,25 @@ export default function PdfViewerScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* Action buttons when drawing */}
-      {isDrawingMode && (
-        <View style={styles.actionBar}>
-          <TouchableOpacity style={styles.actionBtn} onPress={undoLast}>
-            <Text style={styles.actionBtnText}>↩️ Undo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={clearCurrentPage}>
-            <Text style={styles.actionBtnText}>🗑️ Clear Page</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Page info */}
+      <View style={styles.pageInfoBar}>
+        <Text style={styles.pageInfoText}>Page {currentPage} of {totalPages}</Text>
+        {currentPageDrawings.length > 0 && (
+          <Text style={styles.annotationCount}>✏️ {currentPageDrawings.length} strokes</Text>
+        )}
+      </View>
+
+      {/* Floating draw toggle */}
+      <TouchableOpacity
+        style={[styles.drawToggle, isDrawMode && styles.drawToggleActive]}
+        onPress={() => {
+          setIsDrawMode(!isDrawMode);
+          if (!isDrawMode) setShowToolbar(true);
+        }}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.drawToggleText}>{isDrawMode ? '✕' : '✏️'}</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -679,128 +553,68 @@ const styles = StyleSheet.create({
   backBtn: { backgroundColor: COLORS.accent, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 },
   backBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
 
-  topBar: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBorder,
+  drawModeIndicator: {
+    backgroundColor: 'rgba(233, 69, 96, 0.9)', paddingVertical: 6, alignItems: 'center',
   },
-  modeBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    backgroundColor: COLORS.secondary,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  modeBtnActive: { backgroundColor: COLORS.highlight, borderColor: COLORS.highlight },
-  modeBtnText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '600' },
-  modeBtnTextActive: { color: COLORS.white },
+  drawModeIndicatorText: { color: COLORS.white, fontSize: 12, fontWeight: '600' },
 
-  zoomBar: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.secondary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
+  drawToolbar: {
+    backgroundColor: COLORS.secondary, borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder, padding: 10,
   },
-  zoomBtn: {
-    width: 44,
-    height: 36,
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  zoomBtnText: { color: COLORS.text, fontSize: 16, fontWeight: '700' },
-  disabled: { opacity: 0.3 },
-  zoomLevelBtn: {
-    minWidth: 80,
-    height: 36,
-    backgroundColor: COLORS.cardBg,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: COLORS.cardBorder,
-  },
-  zoomLevelText: { color: COLORS.highlight, fontSize: 14, fontWeight: '700' },
-  fitBtn: {
-    paddingHorizontal: 14,
-    height: 36,
-    backgroundColor: COLORS.accent,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fitBtnText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
-
-  drawingTools: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.secondary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.cardBorder,
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  toolLabel: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '700', marginRight: 4 },
-  colorBtn: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: 'transparent' },
-  colorSelected: { borderColor: '#ffffff', transform: [{ scale: 1.15 }] },
-  sizeBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: COLORS.cardBg,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: 'transparent',
-  },
+  toolRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  toolLabel: { color: COLORS.textSecondary, fontSize: 11, fontWeight: '700', width: 40 },
+  colorBtn: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
+  colorSelected: { borderColor: '#ffffff', transform: [{ scale: 1.2 }] },
+  sizeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: COLORS.cardBg, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
   sizeSelected: { borderColor: COLORS.highlight },
   sizeDot: { borderRadius: 20, backgroundColor: COLORS.text },
+  toolActions: { flexDirection: 'row', gap: 6, marginLeft: 'auto' },
+  toolActionBtn: { paddingHorizontal: 10, paddingVertical: 6, backgroundColor: COLORS.cardBg, borderRadius: 8, borderWidth: 1, borderColor: COLORS.cardBorder },
+  toolActionActive: { borderColor: COLORS.highlight, backgroundColor: COLORS.todayBg },
+  toolActionText: { fontSize: 16 },
 
   pdfContainer: { flex: 1, backgroundColor: '#525252', position: 'relative' },
   webview: { flex: 1, backgroundColor: '#525252' },
   loadingOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    justifyContent: 'center', alignItems: 'center',
-    backgroundColor: COLORS.background, zIndex: 10,
+    justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background, zIndex: 10,
   },
   loadingText: { color: COLORS.textSecondary, fontSize: 14, marginTop: 12 },
 
   bottomBar: {
     flexDirection: 'row', backgroundColor: COLORS.primary,
-    paddingHorizontal: 12, paddingVertical: 10,
+    paddingHorizontal: 12, paddingVertical: 8,
     justifyContent: 'space-between', alignItems: 'center',
     borderTopWidth: 1, borderTopColor: COLORS.cardBorder,
   },
-  pageBtn: { paddingVertical: 8, paddingHorizontal: 16, backgroundColor: COLORS.accent, borderRadius: 8 },
+  pageBtn: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: COLORS.accent, borderRadius: 8 },
   pageBtnDisabled: { opacity: 0.3 },
-  pageBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
-  pageInfo: { alignItems: 'center' },
-  pageInfoText: { color: COLORS.text, fontSize: 14, fontWeight: '600' },
-  annotationCount: { color: COLORS.highlight, fontSize: 11, fontWeight: '600', marginTop: 2 },
+  pageBtnText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
 
-  actionBar: {
-    flexDirection: 'row', backgroundColor: COLORS.secondary,
-    paddingHorizontal: 12, paddingVertical: 8, gap: 10,
+  zoomCenter: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  zoomBtn: { width: 36, height: 32, backgroundColor: COLORS.cardBg, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.cardBorder },
+  zoomBtnText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  disabled: { opacity: 0.3 },
+  zoomLevelBtn: { minWidth: 60, height: 32, backgroundColor: COLORS.cardBg, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: COLORS.cardBorder },
+  zoomLevelText: { color: COLORS.highlight, fontSize: 13, fontWeight: '700' },
+  fitBtn: { width: 36, height: 32, backgroundColor: COLORS.accent, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  fitBtnText: { fontSize: 16 },
+
+  pageInfoBar: {
+    flexDirection: 'row', justifyContent: 'center', gap: 16,
+    backgroundColor: COLORS.secondary, paddingVertical: 6,
     borderTopWidth: 1, borderTopColor: COLORS.cardBorder,
   },
-  actionBtn: {
-    flex: 1, paddingVertical: 10, backgroundColor: COLORS.cardBg,
-    borderRadius: 8, alignItems: 'center',
-    borderWidth: 1, borderColor: COLORS.cardBorder,
+  pageInfoText: { color: COLORS.text, fontSize: 12, fontWeight: '600' },
+  annotationCount: { color: COLORS.highlight, fontSize: 12, fontWeight: '600' },
+
+  drawToggle: {
+    position: 'absolute', bottom: 80, right: 16,
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: COLORS.accent, alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 8,
+    zIndex: 100,
   },
-  actionBtnText: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
+  drawToggleActive: { backgroundColor: COLORS.success },
+  drawToggleText: { fontSize: 20, color: COLORS.white, fontWeight: '700' },
 });
